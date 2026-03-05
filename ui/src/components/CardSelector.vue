@@ -8,7 +8,7 @@
       class="vcard"
       :class="{ 'vcard-selected': selectedCard === card }"
       @keydown.enter="emit('vote', card)"
-      @keydown.space="emit('vote', card)"
+      @keydown.space.prevent="emit('vote', card)"
       @click="emit('vote', card)"
     >
       <div>{{ card }}</div>

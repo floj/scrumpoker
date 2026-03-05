@@ -1,5 +1,5 @@
 <template>
-  <div class="input-group mb-3 w-50 mx-auto">
+  <div class="input-group mb-3 mx-auto w-100 w-md-50">
     <span class="input-group-text" id="basic-addon1">Username</span>
     <input
       v-model="newUsername"
