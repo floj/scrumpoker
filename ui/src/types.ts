@@ -9,3 +9,5 @@ export type Room = {
   players: Record<string, Player>;
   revealed: boolean;
 };
+
+export type SSEMessage = { eventName: 'room_updated'; data: Room } | { eventName: 'room_cleared'; data: Room };
