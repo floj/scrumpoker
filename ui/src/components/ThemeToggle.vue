@@ -36,12 +36,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { watch, onMounted, onBeforeUnmount } from 'vue';
+import { useLocalStorage } from '@/composables/useLocalStorage';
 
 type Theme = 'light' | 'dark' | 'auto';
 
-const stored = localStorage.getItem('theme');
-const theme = ref<Theme>(stored === 'light' || stored === 'dark' || stored === 'auto' ? stored : 'auto');
+const theme = useLocalStorage<Theme>('theme', 'auto');
 
 const darkMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
@@ -61,8 +61,7 @@ function onSystemThemeChange() {
   }
 }
 
-watch(theme, (newVal) => {
-  localStorage.setItem('theme', newVal);
+watch(theme, () => {
   setTheme(getPreferredTheme());
 });
 
