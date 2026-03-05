@@ -1,27 +1,17 @@
-<script lang="ts">
+<script setup lang="ts">
+import { ref } from 'vue';
 import ThemeToggle from './components/ThemeToggle.vue';
 
-export default {
-  name: 'App',
-  components: {
-    ThemeToggle,
-  },
-  data() {
-    return {
-      toastIds: 0,
-      toasts: [] as Array<{ id: number; message: string; type: string }>,
-    };
-  },
-  methods: {
-    showToast(message: string, type: string) {
-      const id = this.toastIds++;
-      this.toasts.push({ id, message, type });
-      setTimeout(() => {
-        this.toasts = this.toasts.filter((toast) => toast.id !== id);
-      }, 5000);
-    },
-  },
-};
+let toastIds = 0;
+const toasts = ref<Array<{ id: number; message: string; type: string }>>([]);
+
+function showToast(message: string, type: string) {
+  const id = toastIds++;
+  toasts.value.push({ id, message, type });
+  setTimeout(() => {
+    toasts.value = toasts.value.filter((toast) => toast.id !== id);
+  }, 5000);
+}
 </script>
 
 <template>
