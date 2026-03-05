@@ -8,7 +8,7 @@
       </tr>
     </thead>
     <tbody>
-      <tr v-for="(player, id) in playersOrdered" :key="id">
+      <tr v-for="[id, player] in playersOrdered" :key="id">
         <td class="text-start">{{ player.name }}</td>
         <td class="text-end">
           <span v-if="revealed">{{ player.card }}</span>
@@ -28,19 +28,41 @@ const props = defineProps<{
   revealed: boolean;
 }>();
 
-const playersOrdered = computed(() => {
-  const list = Object.values(props.players).slice();
-  if (props.revealed) {
-    list.sort((a, b) => {
-      if (a.card === b.card) return 0;
-      const valueA = parseInt(a.card, 10);
-      const valueB = parseInt(b.card, 10);
-      if (isNaN(valueA) && isNaN(valueB)) return 0;
-      if (isNaN(valueA)) return 1;
-      if (isNaN(valueB)) return -1;
-      return valueA - valueB;
-    });
+function revealedComparator([, a]: [string, Player], [, b]: [string, Player]) {
+  const valueA = parseInt(a.card, 10);
+  const valueB = parseInt(b.card, 10);
+  if (a.card === b.card) {
+    return a.name.localeCompare(b.name);
   }
-  return list;
+  if (isNaN(valueA) && isNaN(valueB)) {
+    return a.name.localeCompare(b.name);
+  }
+  if (isNaN(valueA)) {
+    return 1;
+  }
+  if (isNaN(valueB)) {
+    return -1;
+  }
+  return valueA - valueB;
+}
+
+function votedComparator([, a]: [string, Player], [, b]: [string, Player]) {
+  if (a.voted === b.voted) {
+    return a.name.localeCompare(b.name);
+  }
+  if (a.voted) {
+    return -1;
+  }
+  return 1;
+}
+
+const playersOrdered = computed(() => {
+  const entries = Object.entries(props.players);
+  if (props.revealed) {
+    entries.sort(revealedComparator);
+  } else {
+    entries.sort(votedComparator);
+  }
+  return entries;
 });
 </script>
