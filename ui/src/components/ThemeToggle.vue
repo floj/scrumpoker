@@ -34,8 +34,12 @@
 export default {
   name: 'ThemeToggle',
   data() {
+    let theme = localStorage.getItem('theme');
+    if (theme !== 'light' && theme !== 'dark' && theme !== 'auto') {
+      theme = 'auto';
+    }
     return {
-      theme: 'auto' as 'light' | 'dark' | 'auto',
+      theme,
     };
   },
   watch: {
@@ -68,7 +72,7 @@ export default {
     },
     onSystemThemeChange(e: MediaQueryListEvent) {
       const newTheme = this.getPreferredTheme();
-      if (newTheme != this.theme) {
+      if (this.theme === 'auto') {
         this.setTheme(newTheme);
       }
     },

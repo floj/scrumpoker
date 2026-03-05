@@ -1,10 +1,5 @@
-<script setup lang="ts">
-import { RouterView } from 'vue-router';
-import ThemeToggle from './components/ThemeToggle.vue';
-</script>
-
 <script lang="ts">
-import { apiBaseURL } from './utils/baseurl';
+import ThemeToggle from './components/ThemeToggle.vue';
 
 export default {
   name: 'App',
@@ -13,12 +8,17 @@ export default {
   },
   data() {
     return {
-      toasts: [] as Array<{ message: string; type: string }>,
+      toastIds: 0,
+      toasts: [] as Array<{ id: number; message: string; type: string }>,
     };
   },
   methods: {
     showToast(message: string, type: string) {
-      console.log(`Toast message: ${message} (type: ${type})`);
+      const id = this.toastIds++;
+      this.toasts.push({ id, message, type });
+      setTimeout(() => {
+        this.toasts = this.toasts.filter((toast) => toast.id !== id);
+      }, 5000);
     },
   },
 };
@@ -31,16 +31,16 @@ export default {
     </div>
     <div>
       <div
-        v-for="(toast, index) in toasts"
-        :key="index"
-        class="`alert d-flex align-items-center`"
+        v-for="toast in toasts"
+        :key="toast.id"
+        class="alert d-flex align-items-center"
         :class="`alert-${toast.type}`"
         role="alert"
       >
         <div>{{ toast.message }}</div>
       </div>
     </div>
-    <RouterView @toast="showToast" />
+    <RouterView />
   </div>
 </template>
 

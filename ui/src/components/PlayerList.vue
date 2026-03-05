@@ -45,13 +45,19 @@ export default {
           if (a.card === b.card) {
             return 0;
           }
-          if (a.card === '?' || a.card === ':coffee:') {
+          const valueA = parseInt(a.card, 10);
+          const valueB = parseInt(b.card, 10);
+          if (isNaN(valueA) && isNaN(valueB)) {
+            return 0;
+          }
+          if (isNaN(valueA)) {
             return 1;
           }
-          if (b.card === '?' || b.card === ':coffee:') {
+          if (isNaN(valueB)) {
             return -1;
           }
-          return parseInt(a.card) - parseInt(b.card);
+
+          return valueA - valueB;
         });
       }
       return players;
