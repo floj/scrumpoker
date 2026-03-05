@@ -1,0 +1,16 @@
+import { ref, watch, type Ref } from 'vue';
+
+export function useLocalStorage(key: string, defaultValue: string = ''): Ref<string> {
+  const stored = localStorage.getItem(key);
+  const data = ref(stored ?? defaultValue);
+
+  watch(data, (newVal) => {
+    if (newVal) {
+      localStorage.setItem(key, newVal);
+    } else {
+      localStorage.removeItem(key);
+    }
+  });
+
+  return data;
+}
