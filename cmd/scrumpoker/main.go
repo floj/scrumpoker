@@ -82,7 +82,10 @@ func main() {
 				AllowMethods: []string{http.MethodGet, http.MethodOptions, http.MethodPost, http.MethodDelete},
 			}))
 			e.Use(loggerMiddleware(logger))
-			e.StaticFS("/", ui.StaticAssets())
+			e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
+				Filesystem: ui.StaticAssets(),
+				HTML5:      true,
+			}))
 
 			base := e.Group("/api/v1")
 

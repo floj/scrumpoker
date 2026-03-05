@@ -90,9 +90,8 @@ func (h *RoomsHandler) cleanupRooms() {
 }
 
 func (h *RoomsHandler) Register(e *echo.Group) {
-	e.GET("/debug", h.DebugInfo)
-	e.POST("/", h.CreateRoom)
-	e.GET("/:id/", h.GetRoom)
+	e.POST("", h.CreateRoom)
+	e.GET("/:id", h.GetRoom)
 	e.POST("/:id/join", h.Join)
 	e.POST("/:id/vote", h.Vote)
 	e.POST("/:id/reveal", h.Reveal)
@@ -366,12 +365,6 @@ func (h *RoomsHandler) Vote(c *echo.Context) error {
 	})
 
 	return c.NoContent(http.StatusNoContent)
-}
-
-func (h *RoomsHandler) DebugInfo(c *echo.Context) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return c.JSONPretty(http.StatusOK, h.rooms, "  ")
 }
 
 func mustMarshal(v any) []byte {
