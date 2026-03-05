@@ -13,7 +13,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute } from 'vue-router';
 import CardActions from '@/components/CardActions.vue';
 import CardSelector from '@/components/CardSelector.vue';
@@ -21,34 +21,19 @@ import PlayerList from '@/components/PlayerList.vue';
 import UsernameInput from '@/components/UsernameInput.vue';
 import type { Player, Room } from '@/types';
 import { roomService } from '@/services/roomService';
+import { useLocalStorage } from '@/composables/useLocalStorage';
 
 const route = useRoute();
 
 const roomName = route.params.id as string;
 
-const playerId = ref(localStorage.getItem('playerId') ?? '');
-const username = ref(localStorage.getItem('username') ?? '');
+const playerId = useLocalStorage('playerId');
+const username = useLocalStorage('username');
 const allowedCards = ref<string[]>([]);
 const players = ref<Record<string, Player>>({});
 const revealed = ref(false);
 const selectedCard = ref('');
 let eventSource: EventSource | null = null;
-
-watch(playerId, (newVal) => {
-  if (newVal) {
-    localStorage.setItem('playerId', newVal);
-  } else {
-    localStorage.removeItem('playerId');
-  }
-});
-
-watch(username, (newVal) => {
-  if (newVal) {
-    localStorage.setItem('username', newVal);
-  } else {
-    localStorage.removeItem('username');
-  }
-});
 
 function updateRoom(room: Room) {
   allowedCards.value = room.allowedCards;
@@ -85,19 +70,23 @@ async function resetCards() {
 }
 
 function onSSEMessage(event: MessageEvent) {
-  const message = JSON.parse(event.data);
-  switch (message.eventName) {
-    case 'room_cleared':
-      console.log('Room cleared');
-      selectedCard.value = '';
-      updateRoom(message.data as Room);
-      break;
-    case 'room_updated':
-      console.log('Room updated:', message.data);
-      updateRoom(message.data as Room);
-      break;
-    default:
-      console.warn('Unknown event type:', message.eventName);
+  try {
+    const message = JSON.parse(event.data);
+    switch (message.eventName) {
+      case 'room_cleared':
+        console.log('Room cleared');
+        selectedCard.value = '';
+        updateRoom(message.data as Room);
+        break;
+      case 'room_updated':
+        console.log('Room updated:', message.data);
+        updateRoom(message.data as Room);
+        break;
+      default:
+        console.warn('Unknown event type:', message.eventName);
+    }
+  } catch (error) {
+    console.error('Error parsing SSE message:', error);
   }
 }
 
