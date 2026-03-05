@@ -18,9 +18,10 @@ type Room struct {
 }
 
 type Player struct {
-	Name  string `json:"name"`
-	Card  string `json:"card"`
-	Voted bool   `json:"voted"`
+	Name      string `json:"name"`
+	Card      string `json:"card"`
+	Voted     bool   `json:"voted"`
+	UpdatedAt int64  `json:"-"`
 }
 
 // Converts a Room to a response struct, hiding the players' cards if the room is not revealed.
@@ -55,7 +56,7 @@ func NewRoom() *Room {
 		CreatedAt:    time.Now().Unix(),
 		UpdatedAt:    time.Now().Unix(),
 		Players:      map[string]*Player{},
-		AllowedCards: []string{"0", "1", "2", "3", "5", "8", "13", "20", "40", "100", ":red question mark:", ":coffee:"},
+		AllowedCards: []string{"0", "1", "2", "3", "5", "8", "13", "20", "40", "100", "❓", "☕"},
 		Revealed:     false,
 	}
 }

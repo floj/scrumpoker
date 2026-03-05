@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brianvoe/gofakeit/v7"
 	"github.com/floj/scrumpoker/pkg/errresp"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
@@ -30,7 +31,6 @@ func NewHandler() (*RoomsHandler, func() error, error) {
 	sseSvr.SplitData = true
 
 	tickerCleanup := time.NewTicker(5 * time.Minute)
-	tickerPing := time.NewTicker(5 * time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	h := &RoomsHandler{
@@ -44,8 +44,6 @@ func NewHandler() (*RoomsHandler, func() error, error) {
 			select {
 			case <-tickerCleanup.C:
 				h.cleanupRooms()
-			case <-tickerPing.C:
-				h.pingRooms()
 			case <-ctx.Done():
 				slog.Info("Stopping background goroutine for rooms handler")
 				return
@@ -57,7 +55,6 @@ func NewHandler() (*RoomsHandler, func() error, error) {
 	stopFn := func() error {
 		cancel()
 		tickerCleanup.Stop()
-		tickerPing.Stop()
 		sseSvr.Close()
 		return nil
 	}
@@ -76,44 +73,64 @@ func (h *RoomsHandler) cleanupRooms() {
 			delete(h.rooms, name)
 			h.sseSvr.RemoveStream(name)
 			slog.Info("Removed inactive room", slog.String("room", name))
+			continue
 		}
-		room.mu.Unlock()
-	}
-}
 
-func (h *RoomsHandler) pingRooms() {
-	slog.Info("Pinging all rooms")
-	h.mu.Lock()
-	defer h.mu.Unlock()
+		for playerID, player := range room.Players {
+			if time.Since(time.Unix(player.UpdatedAt, 0)) > 15*time.Minute {
+				delete(room.Players, playerID)
+				slog.Info("Removed inactive player from room", slog.String("room", name), slog.String("player_id", playerID))
+			}
+		}
 
-	for _, room := range h.rooms {
-		room.mu.Lock()
-		h.sseSvr.Publish(room.Name, &sse.Event{
-			Data: mustMarshal(SSEMessage{
-				Event: "room_updated",
-				Data:  room.ToResponse(),
-			}),
-		})
 		room.mu.Unlock()
 	}
 }
 
 func (h *RoomsHandler) Register(e *echo.Group) {
+	e.GET("/debug", h.DebugInfo)
 	e.POST("/", h.CreateRoom)
-	e.POST("/:id/join", h.JoinRoom)
+	e.GET("/:id/", h.GetRoom)
+	e.POST("/:id/join", h.Join)
 	e.POST("/:id/vote", h.Vote)
 	e.POST("/:id/reveal", h.Reveal)
-	e.DELETE("/:id/", h.Clear)
-	e.GET("/sse", func(c *echo.Context) error {
-		slog.Info("New SSE connection established", slog.String("remote_addr", c.RealIP()))
-		go func() {
-			<-c.Request().Context().Done() // Received Browser Disconnection
-			slog.Info("Client disconnected, closing SSE connection", slog.String("remote_addr", c.RealIP()))
-		}()
+	e.POST("/:id/reset", h.Reset)
+	e.GET("/sse", h.EventStream)
+}
 
-		h.sseSvr.ServeHTTP(c.Response(), c.Request())
-		return nil
-	})
+func (h *RoomsHandler) EventStream(c *echo.Context) error {
+	req := c.Request()
+	if req.Header.Get("Accept") != "text/event-stream" {
+		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
+			Error: "Accept header must be 'text/event-stream'",
+		})
+	}
+	slog.Info("New SSE connection established", slog.String("remote_addr", c.RealIP()))
+	go func() {
+		<-req.Context().Done() // Received Browser Disconnection
+		slog.Info("Client disconnected, closing SSE connection", slog.String("remote_addr", c.RealIP()))
+	}()
+
+	h.sseSvr.ServeHTTP(c.Response(), req)
+	return nil
+}
+
+func (h *RoomsHandler) GetRoom(c *echo.Context) error {
+	roomName := c.Param("id")
+
+	h.mu.Lock()
+	room, ok := h.rooms[roomName]
+	h.mu.Unlock()
+	if !ok {
+		return c.JSON(http.StatusNotFound, errresp.GenericResp{
+			Error: "room not found",
+		})
+	}
+
+	room.mu.Lock()
+	defer room.mu.Unlock()
+
+	return c.JSON(http.StatusOK, room.ToResponse())
 }
 
 type JoinRoomRequest struct {
@@ -121,7 +138,14 @@ type JoinRoomRequest struct {
 	Username string `json:"username"`
 }
 
-func (h *RoomsHandler) JoinRoom(c *echo.Context) error {
+type JoinRoomResponse struct {
+	PlayerID     string `json:"playerId"`
+	Username     string `json:"username"`
+	Room         Room   `json:"room"`
+	SelectedCard string `json:"selectedCard"`
+}
+
+func (h *RoomsHandler) Join(c *echo.Context) error {
 	roomName := c.Param("id")
 
 	req := &JoinRoomRequest{}
@@ -151,16 +175,15 @@ func (h *RoomsHandler) JoinRoom(c *echo.Context) error {
 	}
 
 	player, exists := room.Players[playerID]
-	if exists {
-		slog.Info("Player re-joined the room", slog.String("room", roomName), slog.String("player_id", playerID), slog.String("username", req.Username))
-		player.Name = req.Username
-	} else {
-		slog.Info("New player joined the room", slog.String("room", roomName), slog.String("player_id", playerID), slog.String("username", req.Username))
-		player = &Player{
-			Name: req.Username,
-		}
+	if !exists {
+		player = &Player{}
 		room.Players[playerID] = player
 	}
+	player.Name = req.Username
+	if player.Name == "" {
+		player.Name = gofakeit.Name()
+	}
+	slog.Info("player joined the room", slog.String("room", roomName), slog.Bool("rejoined", exists), slog.String("player_id", playerID), slog.String("username", player.Name))
 
 	room.UpdatedAt = time.Now().Unix()
 	h.sseSvr.Publish(room.Name, &sse.Event{
@@ -170,10 +193,11 @@ func (h *RoomsHandler) JoinRoom(c *echo.Context) error {
 		}),
 	})
 
-	return c.JSON(http.StatusOK, map[string]any{
-		"playerId":     playerID,
-		"room":         room.ToResponse(),
-		"selectedCard": player.Card,
+	return c.JSON(http.StatusOK, JoinRoomResponse{
+		PlayerID:     playerID,
+		Username:     player.Name,
+		Room:         room.ToResponse(),
+		SelectedCard: player.Card,
 	})
 }
 
@@ -223,6 +247,11 @@ func (h *RoomsHandler) Reveal(c *echo.Context) error {
 	room.Revealed = true
 	room.UpdatedAt = time.Now().Unix()
 
+	playerID := c.Request().Header.Get("x-player-id")
+	if player, exist := room.Players[playerID]; exist {
+		player.UpdatedAt = time.Now().Unix()
+	}
+
 	h.sseSvr.Publish(room.Name, &sse.Event{
 		Data: mustMarshal(SSEMessage{
 			Event: "room_updated",
@@ -233,7 +262,7 @@ func (h *RoomsHandler) Reveal(c *echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *RoomsHandler) Clear(c *echo.Context) error {
+func (h *RoomsHandler) Reset(c *echo.Context) error {
 	roomName := c.Param("id")
 
 	h.mu.Lock()
@@ -254,6 +283,11 @@ func (h *RoomsHandler) Clear(c *echo.Context) error {
 	room.Revealed = false
 	room.UpdatedAt = time.Now().Unix()
 
+	playerID := c.Request().Header.Get("x-player-id")
+	if player, exist := room.Players[playerID]; exist {
+		player.UpdatedAt = time.Now().Unix()
+	}
+
 	h.sseSvr.Publish(room.Name, &sse.Event{
 		Data: mustMarshal(SSEMessage{
 			Event: "room_cleared",
@@ -264,13 +298,13 @@ func (h *RoomsHandler) Clear(c *echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
+type VoteRequest struct {
+	PlayerID string `json:"playerId"`
+	Card     string `json:"card"`
+}
+
 func (h *RoomsHandler) Vote(c *echo.Context) error {
 	roomName := c.Param("id")
-
-	type VoteRequest struct {
-		PlayerID string `json:"playerId"`
-		Card     string `json:"card"`
-	}
 
 	req := &VoteRequest{}
 	if err := c.Bind(req); err != nil {
@@ -299,7 +333,7 @@ func (h *RoomsHandler) Vote(c *echo.Context) error {
 	}
 
 	player.Card = req.Card
-	room.Players[req.PlayerID].Card = req.Card
+	player.UpdatedAt = time.Now().Unix()
 	room.UpdatedAt = time.Now().Unix()
 
 	h.sseSvr.Publish(room.Name, &sse.Event{
@@ -315,7 +349,7 @@ func (h *RoomsHandler) Vote(c *echo.Context) error {
 func (h *RoomsHandler) DebugInfo(c *echo.Context) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return c.JSON(http.StatusOK, h.rooms)
+	return c.JSONPretty(http.StatusOK, h.rooms, "  ")
 }
 
 func mustMarshal(v any) []byte {
