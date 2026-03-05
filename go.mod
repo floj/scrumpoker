@@ -11,6 +11,7 @@ require (
 )
 
 require (
+	github.com/brianvoe/gofakeit/v7 v7.14.1 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	gopkg.in/cenkalti/backoff.v1 v1.1.0 // indirect
