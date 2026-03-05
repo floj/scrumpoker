@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { roomService } from '@/services/roomService';
+import ThemeToggle from '@/components/ThemeToggle.vue';
 
 const router = useRouter();
 const creatingRoom = ref(false);
