@@ -1,32 +1,20 @@
-<script lang="ts">
-import { RoomService } from '@/services/roomService';
+<script setup lang="ts">
+import { ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { roomService } from '@/services/roomService';
 
-export default {
-  name: 'HomeView',
-  data() {
-    return {
-      creatingRoom: false,
-    };
-  },
-  props: {
-    roomService: {
-      type: RoomService,
-      required: true,
-    },
-  },
-  inject: ['roomService'],
-  methods: {
-    async createNewRoom() {
-      this.creatingRoom = true;
-      try {
-        const room = await this.roomService.createNewRoom();
-        this.$router.push(`/rooms/${room.name}`);
-      } finally {
-        this.creatingRoom = false;
-      }
-    },
-  },
-};
+const router = useRouter();
+const creatingRoom = ref(false);
+
+async function createNewRoom() {
+  creatingRoom.value = true;
+  try {
+    const room = await roomService.createNewRoom();
+    router.push(`/rooms/${room.name}`);
+  } finally {
+    creatingRoom.value = false;
+  }
+}
 </script>
 
 <template>
