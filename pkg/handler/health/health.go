@@ -17,7 +17,7 @@ func NewHandler() *HealthHandler {
 }
 
 func (h *HealthHandler) Register(e *echo.Group) {
-	e.GET("/", h.Health)
+	e.GET("", h.Health)
 }
 
 func (h *HealthHandler) Health(c *echo.Context) error {
