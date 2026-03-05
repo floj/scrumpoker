@@ -32,7 +32,7 @@ class RoomService {
   }
 
   async createNewRoom(): Promise<CreateRoomResponse> {
-    const resp = await this.dispatchRequest('/rooms/', 'POST');
+    const resp = await this.dispatchRequest('/rooms', 'POST');
     return (await resp.json()) as CreateRoomResponse;
   }
 
@@ -54,7 +54,7 @@ class RoomService {
   }
 
   async getRoom(roomId: string): Promise<Room> {
-    const resp = await this.dispatchRequest(`/rooms/${roomId}/`, 'GET');
+    const resp = await this.dispatchRequest(`/rooms/${roomId}`, 'GET');
     return (await resp.json()) as Room;
   }
 
