@@ -6,10 +6,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 
-	"github.com/brianvoe/gofakeit/v7"
+	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/floj/scrumpoker/pkg/errresp"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
@@ -181,7 +183,7 @@ func (h *RoomsHandler) Join(c *echo.Context) error {
 	}
 	player.Name = req.Username
 	if player.Name == "" {
-		player.Name = gofakeit.Name()
+		player.Name = toTitleCase(petname.Generate(2, " "))
 	}
 	slog.Info("player joined the room", slog.String("room", roomName), slog.Bool("rejoined", exists), slog.String("player_id", playerID), slog.String("username", player.Name))
 
@@ -199,6 +201,26 @@ func (h *RoomsHandler) Join(c *echo.Context) error {
 		Room:         room.ToResponse(),
 		SelectedCard: player.Card,
 	})
+}
+
+func toTitleCase(s string) string {
+	if s == "" {
+		return s
+	}
+	parts := strings.Fields(s)
+	for i, part := range parts {
+		parts[i] = capitalize(part)
+	}
+	return strings.Join(parts, " ")
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	runes := []rune(s)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
 }
 
 type SSEMessage struct {
