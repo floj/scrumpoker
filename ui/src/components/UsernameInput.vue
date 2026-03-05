@@ -20,11 +20,8 @@ export default {
   name: 'UsernameInput',
   data() {
     return {
-      newUsername: '',
+      newUsername: this.username,
     };
-  },
-  created() {
-    this.newUsername = this.username;
   },
   props: {
     username: {
@@ -33,11 +30,19 @@ export default {
     },
   },
   emits: {
-    'update-username': (newUsername: string) => true,
+    updateUsername: (newUsername: string) => true,
+  },
+  watch: {
+    username(newUsername) {
+      this.newUsername = newUsername;
+    },
   },
   methods: {
     changeUsername() {
-      this.$emit('update-username', this.newUsername);
+      if (this.newUsername === this.username) {
+        return;
+      }
+      this.$emit('updateUsername', this.newUsername);
     },
   },
 };

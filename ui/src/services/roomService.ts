@@ -16,9 +16,9 @@ type CreateRoomResponse = {
 
 type JoinRoomResponse = {
   playerId: string;
+  username: string;
   selectedCard: string;
   room: Room;
-  username: string;
 };
 
 class RoomService {
@@ -27,8 +27,8 @@ class RoomService {
   errHandler: (err: any, url: string, options: RequestInit) => Promise<any> = defaultErrHandler;
   statusHandler: (status: number, url: string, options: RequestInit) => Promise<any> = defaultStatusHandler;
 
-  constructor(baseUrl: string) {
-    this.baseUrl = baseUrl;
+  constructor(baseUrl?: string) {
+    this.baseUrl = baseUrl ?? apiBaseURL();
   }
 
   async createNewRoom(): Promise<CreateRoomResponse> {
@@ -65,16 +65,25 @@ class RoomService {
     return eventSource;
   }
 
-  private async dispatchRequest(url: string, method: string, body?: any, headers?: HeadersInit): Promise<Response> {
+  private async dispatchRequest(
+    url: string,
+    method: string,
+    body?: any,
+    ...modifiers: ((r: RequestInit) => void)[]
+  ): Promise<Response> {
     const options: RequestInit = {
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Player-ID': localStorage.getItem('playerId') || '',
-        ...headers,
-      },
-      body: body ? JSON.stringify(body) : undefined,
+      headers: {},
     };
+
+    if (body) {
+      options.headers = {
+        'Content-Type': 'application/json',
+      };
+      options.body = JSON.stringify(body);
+    }
+
+    modifiers.forEach((modifier) => modifier(options));
 
     try {
       const resp = await fetch(`${this.baseUrl}${url}`, options);
@@ -87,7 +96,5 @@ class RoomService {
     }
   }
 }
-
-const roomService = new RoomService(apiBaseURL());
-
-export { roomService };
+const roomService = new RoomService();
+export { RoomService, roomService };

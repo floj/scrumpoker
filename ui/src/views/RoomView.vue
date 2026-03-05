@@ -4,7 +4,7 @@
 
     <UsernameInput :username="username" @updateUsername="updateUsername"></UsernameInput>
 
-    <CardActions :revealed="revealed" :roomName="roomName" />
+    <CardActions :revealed="revealed" @reveal="revealCards" @reset="resetCards" />
 
     <PlayerList :players="players" :revealed="revealed" />
 
@@ -17,17 +17,14 @@ import CardActions from '@/components/CardActions.vue';
 import CardSelector from '@/components/CardSelector.vue';
 import PlayerList from '@/components/PlayerList.vue';
 import UsernameInput from '@/components/UsernameInput.vue';
-import { roomService } from '@/services/roomService';
 import type { Player, Room } from '@/types';
-import { apiBaseURL } from '@/utils/baseurl';
+import { roomService } from '@/services/roomService';
 
 function loadConfig() {
   const username = localStorage.getItem('username') ?? '';
   const playerId = localStorage.getItem('playerId') ?? '';
   return { username, playerId };
 }
-
-const eventSources = new Map<string, EventSource>();
 
 export default {
   name: 'RoomView',
@@ -47,6 +44,7 @@ export default {
       players: {} as Record<string, Player>,
       revealed: false,
       selectedCard: '',
+      eventSource: null as EventSource | null,
     };
   },
   watch: {
@@ -67,19 +65,13 @@ export default {
   },
   async created() {
     await this.joinRoom();
-    let eventSource = eventSources.get(this.roomName);
-    if (!eventSource) {
-      eventSource = roomService.getEventStream(this.roomName);
-      eventSources.set(this.roomName, eventSource);
-    }
-    eventSource.onerror = this.onSSEError;
-    eventSource.onmessage = this.onSSEMessage;
+    this.eventSource = roomService.getEventStream(this.roomName);
+    this.eventSource.onerror = this.onSSEError;
+    this.eventSource.onmessage = this.onSSEMessage;
   },
   beforeUnmount() {
-    const eventSource = eventSources.get(this.roomName);
-    if (eventSource) {
-      eventSource.close();
-      eventSources.delete(this.roomName);
+    if (this.eventSource) {
+      this.eventSource.close();
     }
   },
   methods: {
@@ -106,13 +98,20 @@ export default {
       this.username = newUsername;
       this.joinRoom();
     },
+    async revealCards() {
+      await roomService.revealCards(this.roomName);
+    },
+    async resetCards() {
+      await roomService.resetCards(this.roomName);
+    },
     onSSEMessage(event: MessageEvent) {
       const message = JSON.parse(event.data);
       switch (message.eventName) {
         case 'room_cleared':
           console.log('Room cleared');
           this.selectedCard = '';
-        // intentional fallthrough
+          this.updateRoom(message.data as Room);
+          break;
         case 'room_updated':
           console.log('Room updated:', message.data);
           this.updateRoom(message.data as Room);

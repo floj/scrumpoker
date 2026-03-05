@@ -1,17 +1,29 @@
 <script lang="ts">
-import { apiBaseURL } from '@/utils/baseurl';
-
-import { roomService } from '@/services/roomService';
+import { RoomService } from '@/services/roomService';
 
 export default {
   name: 'HomeView',
   data() {
-    return {};
+    return {
+      creatingRoom: false,
+    };
   },
+  props: {
+    roomService: {
+      type: RoomService,
+      required: true,
+    },
+  },
+  inject: ['roomService'],
   methods: {
     async createNewRoom() {
-      const room = await roomService.createNewRoom();
-      this.$router.push(`/rooms/${room.name}`);
+      this.creatingRoom = true;
+      try {
+        const room = await this.roomService.createNewRoom();
+        this.$router.push(`/rooms/${room.name}`);
+      } finally {
+        this.creatingRoom = false;
+      }
     },
   },
 };
@@ -21,7 +33,9 @@ export default {
   <main class="container">
     <div class="text-center">
       <h1>Scrum Poker</h1>
-      <button type="button" class="btn btn-primary btn-lg" @click="createNewRoom">Create new room</button>
+      <button type="button" class="btn btn-primary btn-lg" @click="createNewRoom" :disabled="creatingRoom">
+        Create new room
+      </button>
     </div>
   </main>
 </template>

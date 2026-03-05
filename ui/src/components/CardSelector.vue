@@ -1,10 +1,14 @@
 <template>
   <div class="vcard-container">
     <div
+      role="button"
       v-for="card in cards"
       :key="card"
+      tabindex="0"
       class="vcard"
       :class="{ 'vcard-selected': selectedCard === card }"
+      @keydown.enter="$emit('vote', card)"
+      @keydown.space="$emit('vote', card)"
       @click="$emit('vote', card)"
     >
       <div>{{ card }}</div>
