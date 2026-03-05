@@ -15,35 +15,22 @@
   </div>
 </template>
 
-<script lang="ts">
-export default {
-  name: 'UsernameInput',
-  data() {
-    return {
-      newUsername: this.username,
-    };
-  },
-  props: {
-    username: {
-      type: String,
-      required: true,
-    },
-  },
-  emits: {
-    updateUsername: (newUsername: string) => true,
-  },
-  watch: {
-    username(newUsername) {
-      this.newUsername = newUsername;
-    },
-  },
-  methods: {
-    changeUsername() {
-      if (this.newUsername === this.username) {
-        return;
-      }
-      this.$emit('updateUsername', this.newUsername);
-    },
-  },
-};
+<script setup lang="ts">
+import { ref, watch } from 'vue';
+
+const props = defineProps<{ username: string }>();
+
+const emit = defineEmits<{ updateUsername: [newUsername: string] }>();
+
+const newUsername = ref(props.username);
+
+watch(
+  () => props.username,
+  (val) => (newUsername.value = val),
+);
+
+function changeUsername() {
+  if (newUsername.value === props.username) return;
+  emit('updateUsername', newUsername.value);
+}
 </script>

@@ -30,54 +30,43 @@
   </div>
 </template>
 
-<script lang="ts">
-export default {
-  name: 'ThemeToggle',
-  data() {
-    let theme = localStorage.getItem('theme');
-    if (theme !== 'light' && theme !== 'dark' && theme !== 'auto') {
-      theme = 'auto';
-    }
-    return {
-      theme,
-    };
-  },
-  watch: {
-    theme(newVal) {
-      localStorage.setItem('theme', newVal);
-      this.setTheme(this.getPreferredTheme());
-    },
-  },
-  created() {
-    this.setTheme(this.getPreferredTheme());
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', this.onSystemThemeChange);
-  },
-  beforeUnmount() {
-    window.matchMedia('(prefers-color-scheme: dark)').removeEventListener('change', this.onSystemThemeChange);
-  },
-  methods: {
-    setTheme(theme: 'light' | 'dark') {
-      document.documentElement.setAttribute('data-bs-theme', theme);
-    },
-    getPreferredTheme(): 'light' | 'dark' {
-      switch (this.theme) {
-        case 'light':
-          return 'light';
-        case 'dark':
-          return 'dark';
-        case 'auto':
-        default:
-          return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      }
-    },
-    onSystemThemeChange(e: MediaQueryListEvent) {
-      const newTheme = this.getPreferredTheme();
-      if (this.theme === 'auto') {
-        this.setTheme(newTheme);
-      }
-    },
-  },
-};
-</script>
+<script setup lang="ts">
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
 
-<style scoped></style>
+type Theme = 'light' | 'dark' | 'auto';
+
+const stored = localStorage.getItem('theme');
+const theme = ref<Theme>(stored === 'light' || stored === 'dark' || stored === 'auto' ? stored : 'auto');
+
+const darkMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+
+function setTheme(resolved: 'light' | 'dark') {
+  document.documentElement.setAttribute('data-bs-theme', resolved);
+}
+
+function getPreferredTheme(): 'light' | 'dark' {
+  if (theme.value === 'light') return 'light';
+  if (theme.value === 'dark') return 'dark';
+  return darkMediaQuery.matches ? 'dark' : 'light';
+}
+
+function onSystemThemeChange() {
+  if (theme.value === 'auto') {
+    setTheme(getPreferredTheme());
+  }
+}
+
+watch(theme, (newVal) => {
+  localStorage.setItem('theme', newVal);
+  setTheme(getPreferredTheme());
+});
+
+onMounted(() => {
+  setTheme(getPreferredTheme());
+  darkMediaQuery.addEventListener('change', onSystemThemeChange);
+});
+
+onBeforeUnmount(() => {
+  darkMediaQuery.removeEventListener('change', onSystemThemeChange);
+});
+</script>

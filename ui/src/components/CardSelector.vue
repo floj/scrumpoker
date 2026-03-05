@@ -7,33 +7,22 @@
       tabindex="0"
       class="vcard"
       :class="{ 'vcard-selected': selectedCard === card }"
-      @keydown.enter="$emit('vote', card)"
-      @keydown.space="$emit('vote', card)"
-      @click="$emit('vote', card)"
+      @keydown.enter="emit('vote', card)"
+      @keydown.space="emit('vote', card)"
+      @click="emit('vote', card)"
     >
       <div>{{ card }}</div>
     </div>
   </div>
 </template>
 
-<script lang="ts">
-export default {
-  name: 'CardSelector',
-  props: {
-    cards: {
-      type: Array as () => Array<string>,
-      required: true,
-    },
-    selectedCard: {
-      type: String,
-      required: false,
-      default: '',
-    },
-  },
-  emits: {
-    vote: (card: string) => true,
-  },
-};
+<script setup lang="ts">
+defineProps<{
+  cards: string[];
+  selectedCard: string;
+}>();
+
+const emit = defineEmits<{ vote: [card: string] }>();
 </script>
 
 <style scoped>

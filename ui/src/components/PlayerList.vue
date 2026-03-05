@@ -19,51 +19,28 @@
   </table>
 </template>
 
-<script lang="ts">
+<script setup lang="ts">
+import { computed } from 'vue';
 import type { Player } from '@/types';
 
-export default {
-  name: 'PlayerList',
-  props: {
-    players: {
-      type: Object as () => Record<string, Player>,
-      required: true,
-    },
-    revealed: {
-      type: Boolean,
-      required: true,
-    },
-  },
-  computed: {
-    playersOrdered() {
-      const players = [] as Array<{ name: string; card: string; voted: boolean }>;
-      for (const player of Object.values(this.players)) {
-        players.push(player);
-      }
-      if (this.revealed) {
-        players.sort((a, b) => {
-          if (a.card === b.card) {
-            return 0;
-          }
-          const valueA = parseInt(a.card, 10);
-          const valueB = parseInt(b.card, 10);
-          if (isNaN(valueA) && isNaN(valueB)) {
-            return 0;
-          }
-          if (isNaN(valueA)) {
-            return 1;
-          }
-          if (isNaN(valueB)) {
-            return -1;
-          }
+const props = defineProps<{
+  players: Record<string, Player>;
+  revealed: boolean;
+}>();
 
-          return valueA - valueB;
-        });
-      }
-      return players;
-    },
-  },
-};
+const playersOrdered = computed(() => {
+  const list = Object.values(props.players).slice();
+  if (props.revealed) {
+    list.sort((a, b) => {
+      if (a.card === b.card) return 0;
+      const valueA = parseInt(a.card, 10);
+      const valueB = parseInt(b.card, 10);
+      if (isNaN(valueA) && isNaN(valueB)) return 0;
+      if (isNaN(valueA)) return 1;
+      if (isNaN(valueB)) return -1;
+      return valueA - valueB;
+    });
+  }
+  return list;
+});
 </script>
-
-<style scoped></style>
