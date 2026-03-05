@@ -22,6 +22,7 @@ import UsernameInput from '@/components/UsernameInput.vue';
 import type { Player, Room } from '@/types';
 import { roomService } from '@/services/roomService';
 import { useLocalStorage } from '@/composables/useLocalStorage';
+import { showToast } from '@/utils/toasts';
 
 const route = useRoute();
 
@@ -42,31 +43,46 @@ function updateRoom(room: Room) {
 }
 
 async function joinRoom() {
-  const data = await roomService.joinRoom(roomName, username.value, playerId.value);
-  console.log('joined room:', data);
-  playerId.value = data.playerId;
-  username.value = data.username;
-  selectedCard.value = data.selectedCard;
-  updateRoom(data.room);
+  try {
+    const data = await roomService.joinRoom(roomName, username.value, playerId.value);
+    playerId.value = data.playerId;
+    username.value = data.username;
+    selectedCard.value = data.selectedCard;
+    updateRoom(data.room);
+  } catch {
+    showToast('Failed to join room');
+  }
 }
 
 async function submitVote(card: string) {
   const c = selectedCard.value === card ? '' : card;
-  await roomService.submitVote(roomName, playerId.value ?? '', c);
-  selectedCard.value = c;
+  try {
+    await roomService.submitVote(roomName, playerId.value ?? '', c);
+    selectedCard.value = c;
+  } catch {
+    showToast('Failed to submit vote');
+  }
 }
 
-function updateUsername(newUsername: string) {
+async function updateUsername(newUsername: string) {
   username.value = newUsername;
-  joinRoom();
+  await joinRoom();
 }
 
 async function revealCards() {
-  await roomService.revealCards(roomName);
+  try {
+    await roomService.revealCards(roomName);
+  } catch {
+    showToast('Failed to reveal cards');
+  }
 }
 
 async function resetCards() {
-  await roomService.resetCards(roomName);
+  try {
+    await roomService.resetCards(roomName);
+  } catch {
+    showToast('Failed to reset cards');
+  }
 }
 
 function onSSEMessage(event: MessageEvent) {
@@ -83,6 +99,7 @@ function onSSEMessage(event: MessageEvent) {
         updateRoom(message.data as Room);
         break;
       default:
+        showToast('Received unknown event from the server, maybe try refreshing the page?');
         console.warn('Unknown event type:', message.eventName);
     }
   } catch (error) {

@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      notyf:
+        specifier: ^3.10.0
+        version: 3.10.0
       vue:
         specifier: ^3.5.29
         version: 3.5.29(typescript@5.9.3)
@@ -821,6 +824,9 @@ packages:
 
   node-releases@2.0.36:
     resolution: {integrity: sha512-TdC8FSgHz8Mwtw9g5L4gR/Sh9XhSP/0DEkQxfEFXOpiul5IiHgHan2VhYYb6agDSfp4KuvltmGApc8HMgUrIkA==}
+
+  notyf@3.10.0:
+    resolution: {integrity: sha512-Mtnp+0qiZxgrH+TzVlzhWyZceHdAZ/UWK0/ju9U0HQeDpap1mZ8cC7H5wSI5mwgni6yeAjaxsTw0sbMK+aSuHw==}
 
   npm-normalize-package-bin@4.0.0:
     resolution: {integrity: sha512-TZKxPvItzai9kN9H/TkmCtx/ZN/hvr3vUycjlfmH0ootY9yFBzNOpiXAdIn1Iteqsvk4lQn6B5PTrt+n6h8k/w==}
@@ -1787,6 +1793,8 @@ snapshots:
   nanoid@3.3.11: {}
 
   node-releases@2.0.36: {}
+
+  notyf@3.10.0: {}
 
   npm-normalize-package-bin@4.0.0: {}
 

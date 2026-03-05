@@ -1,7 +1,8 @@
 <template>
   <div class="input-group mb-3 mx-auto w-100 w-md-50">
-    <span class="input-group-text" id="basic-addon1">Username</span>
+    <label class="input-group-text" for="input-username">Username </label>
     <input
+      id="input-username"
       v-model="newUsername"
       type="text"
       class="form-control"
@@ -9,9 +10,7 @@
       aria-label="Username"
       @keydown.enter="changeUsername"
     />
-    <button class="btn btn-primary" type="button" @click="changeUsername" :disabled="username === newUsername">
-      Change
-    </button>
+    <button class="btn btn-primary" type="button" @click="changeUsername">Change</button>
   </div>
 </template>
 
@@ -30,7 +29,9 @@ watch(
 );
 
 function changeUsername() {
-  if (newUsername.value === props.username) return;
+  if (newUsername.value === props.username) {
+    return;
+  }
   emit('updateUsername', newUsername.value);
 }
 </script>

@@ -44,12 +44,14 @@ const emit = defineEmits<{ vote: [card: string] }>();
 .vcard:hover {
   transform: translateY(-0.5rem);
 }
+
 .vcard-selected {
   background-color: var(--bs-primary);
   color: white;
   border-color: var(--bs-primary);
   transform: translateY(-0.5rem);
 }
+
 .vcard-container {
   display: flex;
   flex-direction: row;
