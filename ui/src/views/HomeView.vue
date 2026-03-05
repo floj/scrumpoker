@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { roomService } from '@/services/roomService';
-import ThemeToggle from '@/components/ThemeToggle.vue';
+import { showToast } from '@/utils/toasts';
 
 const router = useRouter();
 const creatingRoom = ref(false);
@@ -12,6 +12,8 @@ async function createNewRoom() {
   try {
     const room = await roomService.createNewRoom();
     router.push(`/rooms/${room.name}`);
+  } catch {
+    showToast('Failed to create a new room, please try again.');
   } finally {
     creatingRoom.value = false;
   }
@@ -19,25 +21,9 @@ async function createNewRoom() {
 </script>
 
 <template>
-  <main class="container">
-    <div class="text-center">
-      <h1>Scrum Poker</h1>
-      <button type="button" class="btn btn-primary btn-lg" @click="createNewRoom" :disabled="creatingRoom">
-        Create new room
-      </button>
-    </div>
-  </main>
+  <div class="text-center">
+    <button type="button" class="btn btn-primary btn-lg" @click="createNewRoom" :disabled="creatingRoom">
+      Create new room
+    </button>
+  </div>
 </template>
-
-<style scoped>
-.container {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: nowrap;
-  justify-content: center;
-  align-items: center;
-  align-content: stretch;
-  gap: 8px;
-  height: 50vh;
-}
-</style>
