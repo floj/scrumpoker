@@ -18,18 +18,20 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+var flagBind = &cli.IntFlag{
+	Name:    "listen",
+	Value:   1323,
+	Usage:   "Port to bind the server",
+	Aliases: []string{"b"},
+	Sources: cli.EnvVars("LISTEN_PORT"),
+}
+
 func main() {
 	cmd := &cli.Command{
 		Name:  "scrumpoker",
 		Usage: "A simple scrum poker app",
 		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:    "bind",
-				Value:   ":1323",
-				Usage:   "Address to bind the server",
-				Aliases: []string{"b"},
-				Sources: cli.EnvVars("BIND"),
-			},
+			flagBind,
 			&cli.StringFlag{
 				Name:    "persist-file",
 				Usage:   "File to persist rooms data",
@@ -37,8 +39,39 @@ func main() {
 				Sources: cli.EnvVars("PERSIST_FILE"),
 			},
 		},
-		Action: func(ctx context.Context, c *cli.Command) error {
+		Commands: []*cli.Command{{
+			Name:  "healthcheck",
+			Usage: "Run a health check against the server",
+			Flags: []cli.Flag{
+				&cli.StringFlag{
+					Name:    "bind",
+					Value:   ":1323",
+					Usage:   "Address to bind the server",
+					Aliases: []string{"b"},
+					Sources: cli.EnvVars("BIND"),
+				},
+			},
+			Action: func(ctx context.Context, c *cli.Command) error {
+				ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				defer cancel()
 
+				req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://localhost:%d/api/v1/health", c.Int("listen")), nil)
+				if err != nil {
+					return err
+				}
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					return err
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode != http.StatusOK {
+					return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+				}
+				fmt.Println("OK")
+				return nil
+			},
+		}},
+		Action: func(ctx context.Context, c *cli.Command) error {
 			e := echo.New()
 			logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 			e.Use(middleware.Recover())
@@ -75,7 +108,7 @@ func main() {
 			roomsHandler.Register(base.Group("/rooms"))
 
 			sc := echo.StartConfig{
-				Address:         c.String("bind"),
+				Address:         fmt.Sprintf(":%d", c.Int("listen")),
 				GracefulTimeout: 5 * time.Second,
 			}
 			if err := sc.Start(ctx, e); err != nil {
