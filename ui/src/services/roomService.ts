@@ -67,7 +67,7 @@ class RoomService {
 
   private async dispatchRequest(
     url: string,
-    method: string,
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     body?: any,
     ...modifiers: ((r: RequestInit) => void)[]
   ): Promise<Response> {
