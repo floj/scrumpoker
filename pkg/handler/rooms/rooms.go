@@ -151,11 +151,6 @@ func (h *RoomsHandler) cleanupRooms() {
 
 func (h *RoomsHandler) EventStream(c *echo.Context) error {
 	req := c.Request()
-	if req.Header.Get("Accept") != "text/event-stream" {
-		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
-			Error: "Accept header must be 'text/event-stream'",
-		})
-	}
 	slog.Info("New SSE connection established", slog.String("remote_addr", c.RealIP()))
 
 	h.sseSvr.ServeHTTP(c.Response(), req)
