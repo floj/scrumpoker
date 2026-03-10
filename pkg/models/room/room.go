@@ -85,10 +85,11 @@ func (r *Room) Do(playerID string, f func(player *Player, room *Room) (PublishEv
 
 	pe, cberr := f(player, r)
 
-	if pe != EventRoomNoOp {
+	if pe != EventRoomNoOp && cberr == nil {
 		now := time.Now().Unix()
 		r.UpdatedAt = now
-		if player != nil {
+		// re-lookup to catch newly created players
+		if player := r.Players[playerID]; player != nil {
 			player.UpdatedAt = now
 		}
 

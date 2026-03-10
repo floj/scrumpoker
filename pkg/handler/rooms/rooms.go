@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -160,6 +161,12 @@ func (h *RoomsHandler) EventStream(c *echo.Context) error {
 }
 
 func (h *RoomsHandler) WithRoomDo(c *echo.Context, roomName string, playerID string, fn func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error)) error {
+	if !isValidRoomName(roomName) {
+		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
+			Error: "invalid room name",
+		})
+	}
+
 	h.mu.Lock()
 	r, ok := h.rooms[roomName]
 	h.mu.Unlock()
@@ -185,8 +192,33 @@ func (h *RoomsHandler) GetRoom(c *echo.Context) error {
 	})
 }
 
+const allowedRoomNameChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+
+func isValidRoomName(name string) bool {
+	if len(name) < 2 {
+		return false
+	}
+
+	if len(name) > 128 {
+		return false
+	}
+
+	for _, r := range name {
+		if !strings.ContainsRune(allowedRoomNameChars, r) {
+			return false
+		}
+	}
+	return true
+}
+
 func (h *RoomsHandler) Join(c *echo.Context) error {
 	roomName := c.Param("id")
+
+	if !isValidRoomName(roomName) {
+		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
+			Error: "invalid room name",
+		})
+	}
 
 	req := &JoinRoomRequest{}
 	if err := c.Bind(req); err != nil {
@@ -202,8 +234,8 @@ func (h *RoomsHandler) Join(c *echo.Context) error {
 	}
 
 	h.mu.Lock()
-	r, ok := h.rooms[roomName]
-	if !ok {
+	r, exists := h.rooms[roomName]
+	if !exists {
 		if h.maxRooms > 0 && len(h.rooms) >= h.maxRooms {
 			h.mu.Unlock()
 			return c.JSON(http.StatusTooManyRequests, errresp.GenericResp{
@@ -349,15 +381,20 @@ func (h *RoomsHandler) SaveRooms(file string) error {
 		})
 	}
 
-	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	tmp := file + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		f.Close()
+		if err := os.Rename(tmp, file); err != nil {
+			os.Remove(tmp)
+		}
+	}()
 
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
-
 	return enc.Encode(rMap)
 }
 
