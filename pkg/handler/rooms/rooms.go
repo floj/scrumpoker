@@ -150,21 +150,32 @@ func (h *RoomsHandler) EventStream(c *echo.Context) error {
 	return nil
 }
 
-func (h *RoomsHandler) GetRoom(c *echo.Context) error {
-	roomName := c.Param("id")
-
+func (h *RoomsHandler) WithRoomDo(roomName string, playerID string, fn func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error)) (bool, error) {
 	h.mu.Lock()
 	r, ok := h.rooms[roomName]
 	h.mu.Unlock()
+
 	if !ok {
+		return false, nil
+	}
+	return true, r.Do(playerID, fn)
+}
+
+func (h *RoomsHandler) GetRoom(c *echo.Context) error {
+	roomName := c.Param("id")
+	playerID := c.Request().Header.Get("x-player-id")
+	found, err := h.WithRoomDo(roomName, playerID, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+		return roomt.EventRoomNoOp, c.JSON(http.StatusOK, room.ToResponse())
+	})
+	if err != nil {
+		return err
+	}
+	if !found {
 		return c.JSON(http.StatusNotFound, errresp.GenericResp{
 			Error: "room not found",
 		})
 	}
-
-	return r.Do("", func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
-		return roomt.EventRoomNoOp, c.JSON(http.StatusOK, room.ToResponse())
-	})
+	return nil
 }
 
 func (h *RoomsHandler) Join(c *echo.Context) error {
@@ -235,47 +246,46 @@ func (h *RoomsHandler) CreateRoom(c *echo.Context) error {
 
 func (h *RoomsHandler) Reveal(c *echo.Context) error {
 	roomName := c.Param("id")
+	playerID := c.Request().Header.Get("x-player-id")
 
-	h.mu.Lock()
-	r, ok := h.rooms[roomName]
-	h.mu.Unlock()
-	if !ok {
+	found, err := h.WithRoomDo(roomName, playerID, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+		room.Revealed = true
+		return roomt.EventRoomUpdated, c.NoContent(http.StatusNoContent)
+	})
+	if err != nil {
+		return err
+	}
+	if !found {
 		return c.JSON(http.StatusNotFound, errresp.GenericResp{
 			Error: "room not found",
 		})
 	}
-
-	playerID := c.Request().Header.Get("x-player-id")
-	return r.Do(playerID, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
-		room.Revealed = true
-		return roomt.EventRoomUpdated, c.NoContent(http.StatusNoContent)
-	})
+	return nil
 }
 
 func (h *RoomsHandler) Reset(c *echo.Context) error {
 	roomName := c.Param("id")
-
-	h.mu.Lock()
-	r, ok := h.rooms[roomName]
-	h.mu.Unlock()
-	if !ok {
-		return c.JSON(http.StatusNotFound, errresp.GenericResp{
-			Error: "room not found",
-		})
-	}
-
 	playerID := c.Request().Header.Get("x-player-id")
-	return r.Do(playerID, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+
+	found, err := h.WithRoomDo(roomName, playerID, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
 		for _, p := range room.Players {
 			p.Card = ""
 		}
 		room.Revealed = false
 		return roomt.EventRoomCleared, c.NoContent(http.StatusNoContent)
 	})
+	if err != nil {
+		return err
+	}
+	if !found {
+		return c.JSON(http.StatusNotFound, errresp.GenericResp{
+			Error: "room not found",
+		})
+	}
+	return nil
 }
 
 func (h *RoomsHandler) Vote(c *echo.Context) error {
-	roomName := c.Param("id")
 
 	req := &VoteRequest{}
 	if err := c.Bind(req); err != nil {
@@ -283,17 +293,10 @@ func (h *RoomsHandler) Vote(c *echo.Context) error {
 			Error: "invalid request body",
 		})
 	}
+	roomName := c.Param("id")
+	playerID := req.PlayerID
 
-	h.mu.Lock()
-	r, ok := h.rooms[roomName]
-	h.mu.Unlock()
-	if !ok {
-		return c.JSON(http.StatusNotFound, errresp.GenericResp{
-			Error: "room not found",
-		})
-	}
-
-	return r.Do(req.PlayerID, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+	found, err := h.WithRoomDo(roomName, playerID, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
 		if player == nil {
 			return roomt.EventRoomNoOp, c.JSON(http.StatusNotFound, errresp.GenericResp{
 				Error: "player not found in the room",
@@ -302,6 +305,18 @@ func (h *RoomsHandler) Vote(c *echo.Context) error {
 		player.Card = req.Card
 		return roomt.EventRoomUpdated, c.NoContent(http.StatusNoContent)
 	})
+
+	if err != nil {
+		return err
+	}
+
+	if !found {
+		return c.JSON(http.StatusNotFound, errresp.GenericResp{
+			Error: "room not found",
+		})
+	}
+
+	return nil
 }
 
 // Saves the Room to a file in JSON format.
