@@ -10,6 +10,10 @@ import (
 	"github.com/r3labs/sse/v2"
 )
 
+func DefaultCards() []string {
+	return []string{"0", "1", "2", "3", "5", "8", "13", "20", "40", "100", "❓", "☕"}
+}
+
 type Room struct {
 	mu  *sync.Mutex `json:"-"`
 	hub *sse.Server `json:"-"`
@@ -53,7 +57,7 @@ func NewRoom(name string, hub *sse.Server) *Room {
 		CreatedAt:    time.Now().Unix(),
 		UpdatedAt:    time.Now().Unix(),
 		Players:      map[string]*Player{},
-		AllowedCards: []string{"0", "1", "2", "3", "5", "8", "13", "20", "40", "100", "❓", "☕"},
+		AllowedCards: DefaultCards(),
 		Revealed:     false,
 	}
 }
@@ -62,6 +66,13 @@ func (r *Room) Restore(hub *sse.Server) {
 	if r.mu == nil {
 		r.mu = &sync.Mutex{}
 	}
+	if r.Players == nil {
+		r.Players = map[string]*Player{}
+	}
+	if r.AllowedCards == nil {
+		r.AllowedCards = DefaultCards()
+	}
+
 	r.hub = hub
 	r.hub.CreateStream(r.Name)
 }
