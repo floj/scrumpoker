@@ -92,7 +92,7 @@ func main() {
 			healthHandler := health.NewHandler()
 			healthHandler.Register(base.Group("/health"))
 
-			roomsHandler, stop, err := rooms.NewHandler()
+			roomsHandler, stop, err := rooms.NewHandler(ctx)
 			if err != nil {
 				return err
 			}
@@ -112,7 +112,7 @@ func main() {
 
 			sc := echo.StartConfig{
 				Address:         fmt.Sprintf(":%d", c.Int("listen")),
-				GracefulTimeout: 5 * time.Second,
+				GracefulTimeout: 2 * time.Second,
 			}
 			if err := sc.Start(ctx, e); err != nil {
 				return err
