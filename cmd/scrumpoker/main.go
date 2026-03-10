@@ -19,10 +19,10 @@ import (
 )
 
 var flagBind = &cli.IntFlag{
-	Name:    "listen",
+	Name:    "port",
 	Value:   1323,
 	Usage:   "Port to bind the server",
-	Aliases: []string{"b"},
+	Aliases: []string{"p"},
 	Sources: cli.EnvVars("LISTEN_PORT"),
 }
 
@@ -38,24 +38,21 @@ func main() {
 				Aliases: []string{"pf"},
 				Sources: cli.EnvVars("PERSIST_FILE"),
 			},
+			&cli.IntFlag{
+				Name:    "max-rooms",
+				Usage:   "Maximum number of rooms that can be created (0 for unlimited)",
+				Aliases: []string{"mr"},
+				Sources: cli.EnvVars("MAX_ROOMS"),
+			},
 		},
 		Commands: []*cli.Command{{
 			Name:  "healthcheck",
 			Usage: "Run a health check against the server",
-			Flags: []cli.Flag{
-				&cli.StringFlag{
-					Name:    "bind",
-					Value:   ":1323",
-					Usage:   "Address to bind the server",
-					Aliases: []string{"b"},
-					Sources: cli.EnvVars("BIND"),
-				},
-			},
 			Action: func(ctx context.Context, c *cli.Command) error {
 				ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 				defer cancel()
 
-				req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://localhost:%d/api/v1/health", c.Int("listen")), nil)
+				req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://localhost:%d/api/v1/health", c.Int(flagBind.Name)), nil)
 				if err != nil {
 					return err
 				}
@@ -73,7 +70,9 @@ func main() {
 		}},
 		Action: func(ctx context.Context, c *cli.Command) error {
 			e := echo.New()
+
 			logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+
 			e.Use(middleware.Recover())
 			e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 				UnsafeAllowOriginFunc: func(c *echo.Context, origin string) (allowedOrigin string, allowed bool, err error) {
@@ -92,7 +91,7 @@ func main() {
 			healthHandler := health.NewHandler()
 			healthHandler.Register(base.Group("/health"))
 
-			roomsHandler, stop, err := rooms.NewHandler()
+			roomsHandler, stop, err := rooms.NewHandler(c.Int("max-rooms"))
 			if err != nil {
 				return err
 			}
@@ -111,7 +110,7 @@ func main() {
 			roomsHandler.Register(base.Group("/rooms"))
 
 			sc := echo.StartConfig{
-				Address:         fmt.Sprintf(":%d", c.Int("listen")),
+				Address:         fmt.Sprintf(":%d", c.Int(flagBind.Name)),
 				GracefulTimeout: 5 * time.Second,
 			}
 			if err := sc.Start(ctx, e); err != nil {

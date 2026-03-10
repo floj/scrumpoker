@@ -4,29 +4,29 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
+	"slices"
 	"sync"
 	"time"
-	"unicode"
 
 	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/floj/scrumpoker/pkg/errresp"
 	roomt "github.com/floj/scrumpoker/pkg/models/room"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 
 	"github.com/r3labs/sse/v2"
 )
 
 type RoomsHandler struct {
-	mu     *sync.Mutex
-	ticker *time.Ticker
-	rooms  map[string]*roomt.Room
-	sseSvr *sse.Server
+	mu       *sync.Mutex
+	rooms    map[string]*roomt.Room
+	sseSvr   *sse.Server
+	maxRooms int
 }
 
 type JoinRoomRequest struct {
@@ -50,7 +50,7 @@ type VoteRequest struct {
 	Card     string `json:"card"`
 }
 
-func NewHandler() (*RoomsHandler, func() error, error) {
+func NewHandler(maxRooms int) (*RoomsHandler, func() error, error) {
 	sseSvr := sse.New()
 	sseSvr.AutoReplay = false
 	// sseSvr.AutoStream = true
@@ -60,9 +60,10 @@ func NewHandler() (*RoomsHandler, func() error, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	h := &RoomsHandler{
-		mu:     &sync.Mutex{},
-		rooms:  map[string]*roomt.Room{},
-		sseSvr: sseSvr,
+		mu:       &sync.Mutex{},
+		rooms:    map[string]*roomt.Room{},
+		sseSvr:   sseSvr,
+		maxRooms: maxRooms,
 	}
 
 	go func() {
@@ -100,36 +101,51 @@ func (h *RoomsHandler) Register(e *echo.Group) {
 
 func (h *RoomsHandler) cleanupRooms() {
 	slog.Info("Running cleanup for inactive rooms")
-	h.mu.Lock()
-	defer h.mu.Unlock()
 
-	rmRooms := []string{}
+	rooms := h.allRooms()
+	rmRooms := []*roomt.Room{}
+	checkRooms := []*roomt.Room{}
 
-	for _, r := range h.rooms {
+	now := time.Now()
+
+	for _, r := range rooms {
 		r.Do("", func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
-			if time.Since(time.Unix(room.UpdatedAt, 0)) > 4*time.Hour {
-				rmRooms = append(rmRooms, room.Name)
-				return roomt.EventRoomNoOp, nil
+			if now.Sub(time.Unix(room.UpdatedAt, 0)) > 4*time.Hour {
+				rmRooms = append(rmRooms, room)
+			} else {
+				checkRooms = append(checkRooms, room)
 			}
+			return roomt.EventRoomNoOp, nil
+		})
+	}
 
+	if len(rmRooms) > 0 {
+		h.mu.Lock()
+		for _, r := range rmRooms {
+			h.sseSvr.RemoveStream(r.Name)
+			delete(h.rooms, r.Name)
+		}
+		h.mu.Unlock()
+	}
+
+	for _, r := range checkRooms {
+		r.Do("", func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
 			rmPlayers := []string{}
 			for playerID, player := range room.Players {
-				if time.Since(time.Unix(player.UpdatedAt, 0)) > 15*time.Minute {
+				if now.Sub(time.Unix(player.UpdatedAt, 0)) > 15*time.Minute {
 					rmPlayers = append(rmPlayers, playerID)
 				}
 			}
+			if len(rmPlayers) == 0 {
+				return roomt.EventRoomNoOp, nil
+			}
+
 			for _, playerID := range rmPlayers {
 				delete(room.Players, playerID)
 				slog.Info("Removed inactive player from room", slog.String("room", room.Name), slog.String("player_id", playerID))
 			}
-			return roomt.EventRoomNoOp, nil
+			return roomt.EventRoomUpdated, nil
 		})
-
-	}
-
-	for _, name := range rmRooms {
-		h.sseSvr.RemoveStream(name)
-		delete(h.rooms, name)
 	}
 }
 
@@ -141,12 +157,10 @@ func (h *RoomsHandler) EventStream(c *echo.Context) error {
 		})
 	}
 	slog.Info("New SSE connection established", slog.String("remote_addr", c.RealIP()))
-	go func() {
-		<-req.Context().Done() // Received Browser Disconnection
-		slog.Info("Client disconnected, closing SSE connection", slog.String("remote_addr", c.RealIP()))
-	}()
 
 	h.sseSvr.ServeHTTP(c.Response(), req)
+
+	slog.Info("Client disconnected, closing SSE connection", slog.String("remote_addr", c.RealIP()))
 	return nil
 }
 
@@ -186,12 +200,22 @@ func (h *RoomsHandler) Join(c *echo.Context) error {
 		})
 	}
 
+	if len(req.Username) > 64 {
+		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
+			Error: "username must be at most 64 characters",
+		})
+	}
+
 	h.mu.Lock()
 	r, ok := h.rooms[roomName]
 	if !ok {
-		r = roomt.NewRoom()
-		r.Name = roomName
-		r.Init(h.sseSvr)
+		if h.maxRooms > 0 && len(h.rooms) >= h.maxRooms {
+			h.mu.Unlock()
+			return c.JSON(http.StatusTooManyRequests, errresp.GenericResp{
+				Error: "maximum number of rooms reached, please try again later",
+			})
+		}
+		r = roomt.NewRoom(roomName, h.sseSvr)
 		h.rooms[r.Name] = r
 		slog.Info("room not found, created a new one", slog.String("room", r.Name))
 	}
@@ -210,7 +234,7 @@ func (h *RoomsHandler) Join(c *echo.Context) error {
 		}
 		player.Name = req.Username
 		if player.Name == "" {
-			player.Name = toTitleCase(petname.Generate(2, " "))
+			player.Name = cases.Title(language.English).String(petname.Generate(2, " "))
 		}
 		slog.Info("player joined the room", slog.String("room", room.Name), slog.Bool("rejoined", exists), slog.String("player_id", playerID), slog.String("username", player.Name))
 		return roomt.EventRoomUpdated, c.JSON(http.StatusOK, JoinRoomResponse{
@@ -225,12 +249,18 @@ func (h *RoomsHandler) Join(c *echo.Context) error {
 func (h *RoomsHandler) CreateRoom(c *echo.Context) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	if h.maxRooms > 0 && len(h.rooms) >= h.maxRooms {
+		return c.JSON(http.StatusTooManyRequests, errresp.GenericResp{
+			Error: "maximum number of rooms reached, please try again later",
+		})
+	}
 	for range 10 {
-		r := roomt.NewRoom()
-		if _, set := h.rooms[r.Name]; set {
+		name := petname.Generate(3, "-")
+		if _, set := h.rooms[name]; set {
 			continue
 		}
-		r.Init(h.sseSvr)
+		r := roomt.NewRoom(name, h.sseSvr)
 		h.rooms[r.Name] = r
 
 		return c.JSON(http.StatusOK, CreateRoomResponse{
@@ -264,13 +294,25 @@ func (h *RoomsHandler) Reset(c *echo.Context) error {
 }
 
 func (h *RoomsHandler) Vote(c *echo.Context) error {
-
 	req := &VoteRequest{}
 	if err := c.Bind(req); err != nil {
 		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
 			Error: "invalid request body",
 		})
 	}
+
+	if req.PlayerID == "" {
+		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
+			Error: "playerId is required",
+		})
+	}
+
+	if req.Card == "" {
+		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
+			Error: "card is required",
+		})
+	}
+
 	roomName := c.Param("id")
 
 	return h.WithRoomDo(c, roomName, req.PlayerID, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
@@ -279,17 +321,40 @@ func (h *RoomsHandler) Vote(c *echo.Context) error {
 				Error: "player not found in the room",
 			})
 		}
+		if !slices.Contains(room.AllowedCards, req.Card) {
+			return roomt.EventRoomNoOp, c.JSON(http.StatusBadRequest, errresp.GenericResp{
+				Error: "invalid card",
+			})
+		}
 		player.Card = req.Card
 		return roomt.EventRoomUpdated, c.NoContent(http.StatusNoContent)
 	})
 }
 
-// Saves the Room to a file in JSON format.
-func (h *RoomsHandler) SaveRooms(file string) error {
+func (h *RoomsHandler) allRooms() []*roomt.Room {
+	rooms := []*roomt.Room{}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	f, err := os.Create(file)
+	for _, r := range h.rooms {
+		rooms = append(rooms, r)
+	}
+	return rooms
+}
+
+// Saves the Room to a file in JSON format.
+func (h *RoomsHandler) SaveRooms(file string) error {
+	rooms := h.allRooms()
+	rMap := map[string]roomt.Room{}
+
+	for _, r := range rooms {
+		r.Do("", func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+			rMap[r.Name] = r.Copy()
+			return roomt.EventRoomNoOp, nil
+		})
+	}
+
+	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
 	}
@@ -298,22 +363,13 @@ func (h *RoomsHandler) SaveRooms(file string) error {
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
 
-	errs := []error{}
-	for _, r := range h.rooms {
-		err := r.Do("", func(player *roomt.Player, rr *roomt.Room) (roomt.PublishEvent, error) {
-			slog.Info("Saving room", slog.String("room", rr.Name), slog.Int("player_count", len(rr.Players)))
-			return roomt.EventRoomNoOp, enc.Encode(rr)
-		})
-		errs = append(errs, err)
-	}
-
-	return errors.Join(errs...)
+	return enc.Encode(rMap)
 }
 
 func (h *RoomsHandler) LoadRooms(file string) error {
 	f, err := os.Open(file)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			slog.Info("Persist file not found, starting with empty rooms", slog.String("file", file))
 			return nil
 		}
@@ -322,21 +378,12 @@ func (h *RoomsHandler) LoadRooms(file string) error {
 	defer f.Close()
 
 	rooms := map[string]*roomt.Room{}
+	if err := json.NewDecoder(f).Decode(&rooms); err != nil {
+		return err
+	}
 
-	dec := json.NewDecoder(f)
-	errs := []error{}
-	for {
-		r := &roomt.Room{}
-		if err := dec.Decode(r); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			errs = append(errs, err)
-			continue
-		}
-		r.Init(h.sseSvr)
-		rooms[r.Name] = r
-		slog.Info("Loaded room", slog.String("room", r.Name), slog.Int("player_count", len(r.Players)))
+	for _, r := range rooms {
+		r.Restore(h.sseSvr)
 	}
 
 	h.mu.Lock()
@@ -345,24 +392,4 @@ func (h *RoomsHandler) LoadRooms(file string) error {
 	h.rooms = rooms
 	slog.Info("Rooms loaded from persist file", slog.String("file", file), slog.Int("room_count", len(h.rooms)))
 	return nil
-}
-
-func toTitleCase(s string) string {
-	if s == "" {
-		return s
-	}
-	parts := strings.Fields(s)
-	for i, part := range parts {
-		parts[i] = capitalize(part)
-	}
-	return strings.Join(parts, " ")
-}
-
-func capitalize(s string) string {
-	if s == "" {
-		return s
-	}
-	runes := []rune(s)
-	runes[0] = unicode.ToUpper(runes[0])
-	return string(runes)
 }

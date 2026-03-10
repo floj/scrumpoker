@@ -2,10 +2,11 @@ package room
 
 import (
 	"encoding/json"
+	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
-	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/r3labs/sse/v2"
 )
 
@@ -14,8 +15,8 @@ type Room struct {
 	hub *sse.Server `json:"-"`
 
 	Name         string             `json:"name"`
-	CreatedAt    int64              `json:"createdAt"`
-	UpdatedAt    int64              `json:"updatedAt"`
+	CreatedAt    int64              `json:"createdAt,omitempty"`
+	UpdatedAt    int64              `json:"updatedAt,omitempty"`
 	Players      map[string]*Player `json:"players"`
 	AllowedCards []string           `json:"allowedCards"`
 	Revealed     bool               `json:"revealed"`
@@ -25,7 +26,7 @@ type Player struct {
 	Name      string `json:"name"`
 	Card      string `json:"card"`
 	Voted     bool   `json:"voted"`
-	UpdatedAt int64  `json:"-"`
+	UpdatedAt int64  `json:"updatedAt,omitempty"`
 }
 
 type SSEMessage struct {
@@ -41,9 +42,13 @@ const (
 	EventRoomNoOp    PublishEvent = "room_no_op"
 )
 
-func NewRoom() *Room {
-	name := petname.Generate(3, "-")
+func NewRoom(name string, hub *sse.Server) *Room {
+	hub.CreateStream(name)
+
 	return &Room{
+		mu:  &sync.Mutex{},
+		hub: hub,
+
 		Name:         name,
 		CreatedAt:    time.Now().Unix(),
 		UpdatedAt:    time.Now().Unix(),
@@ -53,74 +58,81 @@ func NewRoom() *Room {
 	}
 }
 
-func (r *Room) Init(hub *sse.Server) {
-	r.mu = &sync.Mutex{}
+func (r *Room) Restore(hub *sse.Server) {
+	if r.mu == nil {
+		r.mu = &sync.Mutex{}
+	}
 	r.hub = hub
-	hub.CreateStream(r.Name)
+	r.hub.CreateStream(r.Name)
 }
 
 func (r *Room) Do(playerID string, f func(player *Player, room *Room) (PublishEvent, error)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.UpdatedAt = time.Now().Unix()
 
-	player, exist := r.Players[playerID]
-	if exist {
-		player.UpdatedAt = time.Now().Unix()
-	}
+	player, _ := r.Players[playerID]
 
-	pe, err := f(player, r)
-	if err != nil {
-		return err
-	}
-	if pe == EventRoomNoOp {
-		return nil
-	}
+	pe, cberr := f(player, r)
 
-	r.hub.Publish(r.Name, &sse.Event{
-		Data: mustMarshal(SSEMessage{
+	if pe != EventRoomNoOp {
+		now := time.Now().Unix()
+		r.UpdatedAt = now
+		if player != nil {
+			player.UpdatedAt = now
+		}
+
+		sseMsg, err := json.Marshal(SSEMessage{
 			Event: string(pe),
 			Data:  r.ToResponse(),
-		}),
-	})
+		})
+
+		if err != nil {
+			slog.Error("Failed to marshal SSE message", slog.Any("error", err))
+		} else {
+			r.hub.Publish(r.Name, &sse.Event{
+				Data: sseMsg,
+			})
+		}
+	}
+
+	if cberr != nil {
+		return cberr
+	}
 
 	return nil
 }
 
-func (r *Room) updatePlayerTimestamp(playerID string) {
-	if p, exists := r.Players[playerID]; exists {
-		p.UpdatedAt = time.Now().Unix()
-	}
-}
-
 // Converts a Room to a response struct, hiding the players' cards if the room is not revealed.
 func (r *Room) ToResponse() Room {
-	resp := Room{
-		Name:         r.Name,
-		CreatedAt:    r.CreatedAt,
-		UpdatedAt:    r.UpdatedAt,
-		AllowedCards: r.AllowedCards,
-		Revealed:     r.Revealed,
-		Players:      map[string]*Player{},
-	}
-	for id, p := range r.Players {
-		c := ""
-		if r.Revealed {
-			c = p.Card
+	resp := r.Copy()
+	resp.UpdatedAt = 0
+	resp.CreatedAt = 0
+	for _, p := range resp.Players {
+		p.Voted = p.Card != ""
+		if !r.Revealed {
+			p.Card = ""
 		}
-		resp.Players[id] = &Player{
-			Name:  p.Name,
-			Card:  c,
-			Voted: p.Card != "",
-		}
+		p.UpdatedAt = 0
 	}
 	return resp
 }
 
-func mustMarshal(v any) []byte {
-	b, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
+func (r *Room) Copy() Room {
+	cpy := Room{
+		Name:         r.Name,
+		CreatedAt:    r.CreatedAt,
+		UpdatedAt:    r.UpdatedAt,
+		AllowedCards: slices.Clone(r.AllowedCards),
+		Revealed:     r.Revealed,
+		Players:      map[string]*Player{},
 	}
-	return b
+	for id, p := range r.Players {
+		cpy.Players[id] = &Player{
+			Name:      p.Name,
+			Card:      p.Card,
+			Voted:     p.Voted,
+			UpdatedAt: p.UpdatedAt,
+		}
+	}
+	return cpy
 }
