@@ -3,6 +3,8 @@ package rooms
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,6 +15,7 @@ import (
 
 	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/floj/scrumpoker/pkg/errresp"
+	roomt "github.com/floj/scrumpoker/pkg/models/room"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
@@ -22,8 +25,29 @@ import (
 type RoomsHandler struct {
 	mu     *sync.Mutex
 	ticker *time.Ticker
-	rooms  map[string]*Room
+	rooms  map[string]*roomt.Room
 	sseSvr *sse.Server
+}
+
+type JoinRoomRequest struct {
+	PlayerID string `json:"playerId"`
+	Username string `json:"username"`
+}
+
+type JoinRoomResponse struct {
+	PlayerID     string     `json:"playerId"`
+	Username     string     `json:"username"`
+	Room         roomt.Room `json:"room"`
+	SelectedCard string     `json:"selectedCard"`
+}
+
+type CreateRoomResponse struct {
+	Name string `json:"name"`
+}
+
+type VoteRequest struct {
+	PlayerID string `json:"playerId"`
+	Card     string `json:"card"`
 }
 
 func NewHandler() (*RoomsHandler, func() error, error) {
@@ -37,7 +61,7 @@ func NewHandler() (*RoomsHandler, func() error, error) {
 
 	h := &RoomsHandler{
 		mu:     &sync.Mutex{},
-		rooms:  map[string]*Room{},
+		rooms:  map[string]*roomt.Room{},
 		sseSvr: sseSvr,
 	}
 
@@ -64,31 +88,6 @@ func NewHandler() (*RoomsHandler, func() error, error) {
 	return h, stopFn, nil
 }
 
-func (h *RoomsHandler) cleanupRooms() {
-	slog.Info("Running cleanup for inactive rooms")
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	for name, room := range h.rooms {
-		room.mu.Lock()
-		if time.Since(time.Unix(room.UpdatedAt, 0)) > 4*time.Hour {
-			delete(h.rooms, name)
-			h.sseSvr.RemoveStream(name)
-			slog.Info("Removed inactive room", slog.String("room", name))
-			continue
-		}
-
-		for playerID, player := range room.Players {
-			if time.Since(time.Unix(player.UpdatedAt, 0)) > 15*time.Minute {
-				delete(room.Players, playerID)
-				slog.Info("Removed inactive player from room", slog.String("room", name), slog.String("player_id", playerID))
-			}
-		}
-
-		room.mu.Unlock()
-	}
-}
-
 func (h *RoomsHandler) Register(e *echo.Group) {
 	e.POST("", h.CreateRoom)
 	e.GET("/:id", h.GetRoom)
@@ -97,6 +96,41 @@ func (h *RoomsHandler) Register(e *echo.Group) {
 	e.POST("/:id/reveal", h.Reveal)
 	e.POST("/:id/reset", h.Reset)
 	e.GET("/sse", h.EventStream)
+}
+
+func (h *RoomsHandler) cleanupRooms() {
+	slog.Info("Running cleanup for inactive rooms")
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	rmRooms := []string{}
+
+	for _, r := range h.rooms {
+		r.Do("", func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+			if time.Since(time.Unix(room.UpdatedAt, 0)) > 4*time.Hour {
+				rmRooms = append(rmRooms, room.Name)
+				return roomt.EventRoomNoOp, nil
+			}
+
+			rmPlayers := []string{}
+			for playerID, player := range room.Players {
+				if time.Since(time.Unix(player.UpdatedAt, 0)) > 15*time.Minute {
+					rmPlayers = append(rmPlayers, playerID)
+				}
+			}
+			for _, playerID := range rmPlayers {
+				delete(room.Players, playerID)
+				slog.Info("Removed inactive player from room", slog.String("room", room.Name), slog.String("player_id", playerID))
+			}
+			return roomt.EventRoomNoOp, nil
+		})
+
+	}
+
+	for _, name := range rmRooms {
+		h.sseSvr.RemoveStream(name)
+		delete(h.rooms, name)
+	}
 }
 
 func (h *RoomsHandler) EventStream(c *echo.Context) error {
@@ -120,7 +154,7 @@ func (h *RoomsHandler) GetRoom(c *echo.Context) error {
 	roomName := c.Param("id")
 
 	h.mu.Lock()
-	room, ok := h.rooms[roomName]
+	r, ok := h.rooms[roomName]
 	h.mu.Unlock()
 	if !ok {
 		return c.JSON(http.StatusNotFound, errresp.GenericResp{
@@ -128,22 +162,9 @@ func (h *RoomsHandler) GetRoom(c *echo.Context) error {
 		})
 	}
 
-	room.mu.Lock()
-	defer room.mu.Unlock()
-
-	return c.JSON(http.StatusOK, room.ToResponse())
-}
-
-type JoinRoomRequest struct {
-	PlayerID string `json:"playerId"`
-	Username string `json:"username"`
-}
-
-type JoinRoomResponse struct {
-	PlayerID     string `json:"playerId"`
-	Username     string `json:"username"`
-	Room         Room   `json:"room"`
-	SelectedCard string `json:"selectedCard"`
+	return r.Do("", func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+		return roomt.EventRoomNoOp, c.JSON(http.StatusOK, room.ToResponse())
+	})
 }
 
 func (h *RoomsHandler) Join(c *echo.Context) error {
@@ -157,49 +178,193 @@ func (h *RoomsHandler) Join(c *echo.Context) error {
 	}
 
 	h.mu.Lock()
-	room, ok := h.rooms[roomName]
+	r, ok := h.rooms[roomName]
 	if !ok {
-		room = NewRoom()
-		room.Name = roomName
-		h.rooms[room.Name] = room
-		h.sseSvr.CreateStream(room.Name)
-		slog.Info("room not found, created a new one", slog.String("room", roomName))
+		r = roomt.NewRoom()
+		r.Name = roomName
+		r.Init(h.sseSvr)
+		h.rooms[r.Name] = r
+		slog.Info("room not found, created a new one", slog.String("room", r.Name))
 	}
 	h.mu.Unlock()
 
-	room.mu.Lock()
-	defer room.mu.Unlock()
-
 	playerID := req.PlayerID
 	if playerID == "" {
-		playerID = uuid.Must(uuid.NewV7()).String()
+		playerID = uuid.New().String()
 	}
 
-	player, exists := room.Players[playerID]
-	if !exists {
-		player = &Player{}
-		room.Players[playerID] = player
-	}
-	player.Name = req.Username
-	if player.Name == "" {
-		player.Name = toTitleCase(petname.Generate(2, " "))
-	}
-	slog.Info("player joined the room", slog.String("room", roomName), slog.Bool("rejoined", exists), slog.String("player_id", playerID), slog.String("username", player.Name))
-
-	room.UpdatedAt = time.Now().Unix()
-	h.sseSvr.Publish(room.Name, &sse.Event{
-		Data: mustMarshal(SSEMessage{
-			Event: "room_updated",
-			Data:  room.ToResponse(),
-		}),
+	return r.Do(playerID, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+		exists := player != nil
+		if !exists {
+			player = &roomt.Player{}
+			room.Players[playerID] = player
+		}
+		player.Name = req.Username
+		if player.Name == "" {
+			player.Name = toTitleCase(petname.Generate(2, " "))
+		}
+		slog.Info("player joined the room", slog.String("room", room.Name), slog.Bool("rejoined", exists), slog.String("player_id", playerID), slog.String("username", player.Name))
+		return roomt.EventRoomUpdated, c.JSON(http.StatusOK, JoinRoomResponse{
+			PlayerID:     playerID,
+			Username:     player.Name,
+			Room:         room.ToResponse(),
+			SelectedCard: player.Card,
+		})
 	})
+}
 
-	return c.JSON(http.StatusOK, JoinRoomResponse{
-		PlayerID:     playerID,
-		Username:     player.Name,
-		Room:         room.ToResponse(),
-		SelectedCard: player.Card,
+func (h *RoomsHandler) CreateRoom(c *echo.Context) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for range 10 {
+		r := roomt.NewRoom()
+		if _, set := h.rooms[r.Name]; set {
+			continue
+		}
+		r.Init(h.sseSvr)
+		h.rooms[r.Name] = r
+
+		return c.JSON(http.StatusOK, CreateRoomResponse{
+			Name: r.Name,
+		})
+	}
+	return c.JSON(http.StatusInternalServerError, errresp.GenericResp{
+		Error: "failed to create a unique room name, please try again",
 	})
+}
+
+func (h *RoomsHandler) Reveal(c *echo.Context) error {
+	roomName := c.Param("id")
+
+	h.mu.Lock()
+	r, ok := h.rooms[roomName]
+	h.mu.Unlock()
+	if !ok {
+		return c.JSON(http.StatusNotFound, errresp.GenericResp{
+			Error: "room not found",
+		})
+	}
+
+	playerID := c.Request().Header.Get("x-player-id")
+	return r.Do(playerID, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+		room.Revealed = true
+		return roomt.EventRoomUpdated, c.NoContent(http.StatusNoContent)
+	})
+}
+
+func (h *RoomsHandler) Reset(c *echo.Context) error {
+	roomName := c.Param("id")
+
+	h.mu.Lock()
+	r, ok := h.rooms[roomName]
+	h.mu.Unlock()
+	if !ok {
+		return c.JSON(http.StatusNotFound, errresp.GenericResp{
+			Error: "room not found",
+		})
+	}
+
+	playerID := c.Request().Header.Get("x-player-id")
+	return r.Do(playerID, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+		for _, p := range room.Players {
+			p.Card = ""
+		}
+		room.Revealed = false
+		return roomt.EventRoomCleared, c.NoContent(http.StatusNoContent)
+	})
+}
+
+func (h *RoomsHandler) Vote(c *echo.Context) error {
+	roomName := c.Param("id")
+
+	req := &VoteRequest{}
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
+			Error: "invalid request body",
+		})
+	}
+
+	h.mu.Lock()
+	r, ok := h.rooms[roomName]
+	h.mu.Unlock()
+	if !ok {
+		return c.JSON(http.StatusNotFound, errresp.GenericResp{
+			Error: "room not found",
+		})
+	}
+
+	return r.Do(req.PlayerID, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+		if player == nil {
+			return roomt.EventRoomNoOp, c.JSON(http.StatusNotFound, errresp.GenericResp{
+				Error: "player not found in the room",
+			})
+		}
+		player.Card = req.Card
+		return roomt.EventRoomUpdated, c.NoContent(http.StatusNoContent)
+	})
+}
+
+// Saves the Room to a file in JSON format.
+func (h *RoomsHandler) SaveRooms(file string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	f, err := os.Create(file)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+
+	errs := []error{}
+	for _, r := range h.rooms {
+		err := r.Do("", func(player *roomt.Player, rr *roomt.Room) (roomt.PublishEvent, error) {
+			slog.Info("Saving room", slog.String("room", rr.Name), slog.Int("player_count", len(rr.Players)))
+			return roomt.EventRoomNoOp, enc.Encode(rr)
+		})
+		errs = append(errs, err)
+	}
+
+	return errors.Join(errs...)
+}
+
+func (h *RoomsHandler) LoadRooms(file string) error {
+	f, err := os.Open(file)
+	if err != nil {
+		if os.IsNotExist(err) {
+			slog.Info("Persist file not found, starting with empty rooms", slog.String("file", file))
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+
+	rooms := map[string]*roomt.Room{}
+
+	dec := json.NewDecoder(f)
+	errs := []error{}
+	for {
+		r := &roomt.Room{}
+		if err := dec.Decode(r); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			errs = append(errs, err)
+			continue
+		}
+		r.Init(h.sseSvr)
+		rooms[r.Name] = r
+		slog.Info("Loaded room", slog.String("room", r.Name), slog.Int("player_count", len(r.Players)))
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.rooms = rooms
+	slog.Info("Rooms loaded from persist file", slog.String("file", file), slog.Int("room_count", len(h.rooms)))
+	return nil
 }
 
 func toTitleCase(s string) string {
@@ -220,211 +385,4 @@ func capitalize(s string) string {
 	runes := []rune(s)
 	runes[0] = unicode.ToUpper(runes[0])
 	return string(runes)
-}
-
-type SSEMessage struct {
-	Event string `json:"eventName"`
-	Data  any    `json:"data"`
-}
-
-type CreateRoomResponse struct {
-	Name string `json:"name"`
-}
-
-func (h *RoomsHandler) CreateRoom(c *echo.Context) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for range 10 {
-		r := NewRoom()
-		if _, set := h.rooms[r.Name]; set {
-			continue
-		}
-		h.rooms[r.Name] = r
-		h.sseSvr.CreateStream(r.Name)
-		return c.JSON(http.StatusOK, CreateRoomResponse{
-			Name: r.Name,
-		})
-	}
-	return c.JSON(http.StatusInternalServerError, errresp.GenericResp{
-		Error: "failed to create a unique room name, please try again",
-	})
-}
-
-func (h *RoomsHandler) Reveal(c *echo.Context) error {
-	roomName := c.Param("id")
-
-	h.mu.Lock()
-	room, ok := h.rooms[roomName]
-	h.mu.Unlock()
-	if !ok {
-		return c.JSON(http.StatusNotFound, errresp.GenericResp{
-			Error: "room not found",
-		})
-	}
-
-	room.mu.Lock()
-	defer room.mu.Unlock()
-
-	room.Revealed = true
-	room.UpdatedAt = time.Now().Unix()
-
-	playerID := c.Request().Header.Get("x-player-id")
-	if player, exist := room.Players[playerID]; exist {
-		player.UpdatedAt = time.Now().Unix()
-	}
-
-	h.sseSvr.Publish(room.Name, &sse.Event{
-		Data: mustMarshal(SSEMessage{
-			Event: "room_updated",
-			Data:  room.ToResponse(),
-		}),
-	})
-
-	return c.NoContent(http.StatusNoContent)
-}
-
-func (h *RoomsHandler) Reset(c *echo.Context) error {
-	roomName := c.Param("id")
-
-	h.mu.Lock()
-	room, ok := h.rooms[roomName]
-	h.mu.Unlock()
-	if !ok {
-		return c.JSON(http.StatusNotFound, errresp.GenericResp{
-			Error: "room not found",
-		})
-	}
-
-	room.mu.Lock()
-	defer room.mu.Unlock()
-
-	for _, p := range room.Players {
-		p.Card = ""
-	}
-	room.Revealed = false
-	room.UpdatedAt = time.Now().Unix()
-
-	playerID := c.Request().Header.Get("x-player-id")
-	if player, exist := room.Players[playerID]; exist {
-		player.UpdatedAt = time.Now().Unix()
-	}
-
-	h.sseSvr.Publish(room.Name, &sse.Event{
-		Data: mustMarshal(SSEMessage{
-			Event: "room_cleared",
-			Data:  room.ToResponse(),
-		}),
-	})
-
-	return c.NoContent(http.StatusNoContent)
-}
-
-type VoteRequest struct {
-	PlayerID string `json:"playerId"`
-	Card     string `json:"card"`
-}
-
-func (h *RoomsHandler) Vote(c *echo.Context) error {
-	roomName := c.Param("id")
-
-	req := &VoteRequest{}
-	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
-			Error: "invalid request body",
-		})
-	}
-
-	h.mu.Lock()
-	room, ok := h.rooms[roomName]
-	h.mu.Unlock()
-	if !ok {
-		return c.JSON(http.StatusNotFound, errresp.GenericResp{
-			Error: "room not found",
-		})
-	}
-
-	room.mu.Lock()
-	defer room.mu.Unlock()
-
-	player, ok := room.Players[req.PlayerID]
-	if !ok {
-		return c.JSON(http.StatusNotFound, errresp.GenericResp{
-			Error: "player not found in the room",
-		})
-	}
-
-	player.Card = req.Card
-	player.UpdatedAt = time.Now().Unix()
-	room.UpdatedAt = time.Now().Unix()
-
-	h.sseSvr.Publish(room.Name, &sse.Event{
-		Data: mustMarshal(SSEMessage{
-			Event: "room_updated",
-			Data:  room.ToResponse(),
-		}),
-	})
-
-	return c.NoContent(http.StatusNoContent)
-}
-
-func mustMarshal(v any) []byte {
-	b, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
-	}
-	return b
-}
-
-// Saves the Room to a file in JSON format.
-func (h *RoomsHandler) SaveRooms(file string) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	// Lock each room to ensure no updates happen while saving
-	for _, r := range h.rooms {
-		r.mu.Lock()
-		defer r.mu.Unlock()
-	}
-
-	os.OpenFile(file, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
-	f, err := os.Create(file)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	enc := json.NewEncoder(f)
-	enc.SetIndent("", "  ")
-	return enc.Encode(h.rooms)
-
-}
-
-func (h *RoomsHandler) LoadRooms(file string) error {
-	f, err := os.Open(file)
-	if err != nil {
-		if os.IsNotExist(err) {
-			slog.Info("Persist file not found, starting with empty rooms", slog.String("file", file))
-			return nil
-		}
-		return err
-	}
-	defer f.Close()
-
-	rooms := map[string]*Room{}
-	if err := json.NewDecoder(f).Decode(&rooms); err != nil {
-		return err
-	}
-
-	for _, r := range rooms {
-		r.mu = &sync.Mutex{}
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.rooms = rooms
-	for _, r := range h.rooms {
-		h.sseSvr.CreateStream(r.Name)
-	}
-	slog.Info("Rooms loaded from persist file", slog.String("file", file), slog.Int("room_count", len(h.rooms)))
-
-	return nil
 }
