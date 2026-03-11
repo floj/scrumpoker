@@ -17,7 +17,7 @@ import CardActions from '@/components/CardActions.vue';
 import CardSelector from '@/components/CardSelector.vue';
 import PlayerList from '@/components/PlayerList.vue';
 import UsernameInput from '@/components/UsernameInput.vue';
-import type { Player, Room, SSEMessage } from '@/types';
+import type { Player, Room, SSEMessage as RoomEventMessage } from '@/types';
 import { roomService } from '@/services/roomService';
 import { useLocalStorage } from '@/composables/useLocalStorage';
 import { showToast } from '@/utils/toasts';
@@ -33,7 +33,7 @@ const players = ref<Record<string, Player>>({});
 const revealed = ref(false);
 const selectedCard = ref('');
 
-let eventSource: EventSource | null = null;
+let websocket: WebSocket | null = null;
 
 function updateRoom(room: Room) {
   allowedCards.value = room.allowedCards;
@@ -84,9 +84,9 @@ async function resetCards() {
   }
 }
 
-function onSSEMessage(event: MessageEvent) {
+function onRoomEventMessage(event: MessageEvent) {
   try {
-    const message = JSON.parse(event.data) as SSEMessage;
+    const message = JSON.parse(event.data) as RoomEventMessage;
     switch (message.eventName) {
       case 'room_cleared':
         console.log('Room cleared');
@@ -106,8 +106,8 @@ function onSSEMessage(event: MessageEvent) {
   }
 }
 
-async function onSSEError(error: any) {
-  console.error('SSE error:', error);
+async function onRoomEventError(error: any) {
+  console.error('WebSocket error:', error);
   const room = await roomService.getRoom(roomName.value);
   updateRoom(room);
 }
@@ -115,15 +115,15 @@ async function onSSEError(error: any) {
 onMounted(async () => {
   document.title = `no-fuzz estimates - Room ${roomName.value}`;
   await joinRoom();
-  eventSource = roomService.getEventStream(roomName.value);
-  eventSource.onerror = onSSEError;
-  eventSource.onmessage = onSSEMessage;
+  websocket = roomService.getWebSocket(roomName.value);
+  websocket.onerror = onRoomEventError;
+  websocket.onmessage = onRoomEventMessage;
 });
 
 onBeforeUnmount(() => {
   document.title = 'no-fuzz estimates';
-  if (eventSource) {
-    eventSource.close();
+  if (websocket) {
+    websocket.close();
   }
 });
 </script>

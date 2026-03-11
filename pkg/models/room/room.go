@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/r3labs/sse/v2"
+	"github.com/olahol/melody"
 )
 
 func DefaultCards() []string {
@@ -15,8 +15,8 @@ func DefaultCards() []string {
 }
 
 type Room struct {
-	mu  *sync.Mutex `json:"-"`
-	hub *sse.Server `json:"-"`
+	mu  *sync.Mutex    `json:"-"`
+	hub *melody.Melody `json:"-"`
 
 	Name         string             `json:"name"`
 	CreatedAt    int64              `json:"createdAt,omitempty"`
@@ -46,12 +46,10 @@ const (
 	EventRoomNoOp    PublishEvent = "room_no_op"
 )
 
-func NewRoom(name string, hub *sse.Server) *Room {
-	hub.CreateStream(name)
-
+func NewRoom(name string, m *melody.Melody) *Room {
 	return &Room{
 		mu:  &sync.Mutex{},
-		hub: hub,
+		hub: m,
 
 		Name:         name,
 		CreatedAt:    time.Now().Unix(),
@@ -62,7 +60,7 @@ func NewRoom(name string, hub *sse.Server) *Room {
 	}
 }
 
-func (r *Room) Restore(hub *sse.Server) {
+func (r *Room) Restore(m *melody.Melody) {
 	if r.mu == nil {
 		r.mu = &sync.Mutex{}
 	}
@@ -73,8 +71,7 @@ func (r *Room) Restore(hub *sse.Server) {
 		r.AllowedCards = DefaultCards()
 	}
 
-	r.hub = hub
-	r.hub.CreateStream(r.Name)
+	r.hub = m
 }
 
 func (r *Room) Do(playerID string, f func(player *Player, room *Room) (PublishEvent, error)) error {
@@ -101,8 +98,11 @@ func (r *Room) Do(playerID string, f func(player *Player, room *Room) (PublishEv
 		if err != nil {
 			slog.Error("Failed to marshal SSE message", slog.Any("error", err))
 		} else {
-			r.hub.Publish(r.Name, &sse.Event{
-				Data: sseMsg,
+			r.hub.BroadcastFilter(sseMsg, func(s *melody.Session) bool {
+				if v, ok := s.Get("room"); ok {
+					return v == r.Name
+				}
+				return false
 			})
 		}
 	}

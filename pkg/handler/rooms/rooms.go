@@ -17,17 +17,16 @@ import (
 	roomt "github.com/floj/scrumpoker/pkg/models/room"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
+	"github.com/olahol/melody"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
-
-	"github.com/r3labs/sse/v2"
 )
 
 type RoomsHandler struct {
 	mu       *sync.Mutex
 	rooms    map[string]*roomt.Room
-	sseSvr   *sse.Server
 	maxRooms int
+	m        *melody.Melody
 }
 
 type JoinRoomRequest struct {
@@ -52,18 +51,15 @@ type VoteRequest struct {
 }
 
 func NewHandler(maxRooms int) (*RoomsHandler, func() error, error) {
-	sseSvr := sse.New()
-	sseSvr.AutoReplay = false
-	// sseSvr.AutoStream = true
-	sseSvr.SplitData = true
 
 	tickerCleanup := time.NewTicker(5 * time.Minute)
 	ctx, cancel := context.WithCancel(context.Background())
+	m := melody.New()
 
 	h := &RoomsHandler{
 		mu:       &sync.Mutex{},
 		rooms:    map[string]*roomt.Room{},
-		sseSvr:   sseSvr,
+		m:        m,
 		maxRooms: maxRooms,
 	}
 
@@ -83,7 +79,7 @@ func NewHandler(maxRooms int) (*RoomsHandler, func() error, error) {
 	stopFn := func() error {
 		cancel()
 		tickerCleanup.Stop()
-		sseSvr.Close()
+		m.Close()
 		return nil
 	}
 
@@ -97,7 +93,7 @@ func (h *RoomsHandler) Register(e *echo.Group) {
 	e.POST("/:id/vote", h.Vote)
 	e.POST("/:id/reveal", h.Reveal)
 	e.POST("/:id/reset", h.Reset)
-	e.GET("/sse", h.EventStream)
+	e.GET("/:id/ws", h.EventHub)
 }
 
 func (h *RoomsHandler) cleanupRooms() {
@@ -123,7 +119,6 @@ func (h *RoomsHandler) cleanupRooms() {
 	if len(rmRooms) > 0 {
 		h.mu.Lock()
 		for _, r := range rmRooms {
-			h.sseSvr.RemoveStream(r.Name)
 			delete(h.rooms, r.Name)
 		}
 		h.mu.Unlock()
@@ -150,14 +145,11 @@ func (h *RoomsHandler) cleanupRooms() {
 	}
 }
 
-func (h *RoomsHandler) EventStream(c *echo.Context) error {
-	req := c.Request()
-	slog.Info("New SSE connection established", slog.String("remote_addr", c.RealIP()))
-
-	h.sseSvr.ServeHTTP(c.Response(), req)
-
-	slog.Info("Client disconnected, closing SSE connection", slog.String("remote_addr", c.RealIP()))
-	return nil
+func (h *RoomsHandler) EventHub(c *echo.Context) error {
+	slog.Info("new webocket connection", slog.String("room", c.Param("id")), slog.String("remote_addr", c.RealIP()))
+	return h.m.HandleRequestWithKeys(c.Response(), c.Request(), map[string]any{
+		"room": c.Param("id"),
+	})
 }
 
 func (h *RoomsHandler) WithRoomDo(c *echo.Context, roomName string, playerID string, fn func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error)) error {
@@ -242,7 +234,7 @@ func (h *RoomsHandler) Join(c *echo.Context) error {
 				Error: "maximum number of rooms reached, please try again later",
 			})
 		}
-		r = roomt.NewRoom(roomName, h.sseSvr)
+		r = roomt.NewRoom(roomName, h.m)
 		h.rooms[r.Name] = r
 		slog.Info("room not found, created a new one", slog.String("room", r.Name))
 	}
@@ -287,7 +279,7 @@ func (h *RoomsHandler) CreateRoom(c *echo.Context) error {
 		if _, set := h.rooms[name]; set {
 			continue
 		}
-		r := roomt.NewRoom(name, h.sseSvr)
+		r := roomt.NewRoom(name, h.m)
 		h.rooms[r.Name] = r
 
 		return c.JSON(http.StatusOK, CreateRoomResponse{
@@ -415,7 +407,7 @@ func (h *RoomsHandler) LoadRooms(file string) error {
 	}
 
 	for _, r := range rooms {
-		r.Restore(h.sseSvr)
+		r.Restore(h.m)
 	}
 
 	h.mu.Lock()

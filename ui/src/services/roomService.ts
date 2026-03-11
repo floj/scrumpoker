@@ -58,11 +58,9 @@ class RoomService {
     return (await resp.json()) as Room;
   }
 
-  getEventStream(roomId: string): EventSource {
-    const params = new URLSearchParams({ stream: roomId });
-    const eventSource = new EventSource(`${this.baseUrl}/rooms/sse?${params.toString()}`);
-
-    return eventSource;
+  getWebSocket(roomId: string): WebSocket {
+    const wsUrl = this.baseUrl.replace(/^http/, 'ws') + `/rooms/${roomId}/ws`;
+    return new WebSocket(wsUrl);
   }
 
   private async dispatchRequest(
