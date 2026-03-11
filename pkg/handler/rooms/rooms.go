@@ -404,16 +404,16 @@ func (h *RoomsHandler) SaveRooms(file string) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		f.Close()
-		if err := os.Rename(tmp, file); err != nil {
-			os.Remove(tmp)
-		}
-	}()
 
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
-	return enc.Encode(rMap)
+	if encErr := enc.Encode(rMap); encErr != nil {
+		f.Close()
+		os.Remove(tmp)
+		return encErr
+	}
+	f.Close()
+	return os.Rename(tmp, file)
 }
 
 func (h *RoomsHandler) LoadRooms(file string) error {
