@@ -170,7 +170,7 @@ func (h *RoomsHandler) EventHub(c *echo.Context) error {
 	})
 }
 
-func (h *RoomsHandler) WithRoomDo(c *echo.Context, roomName string, authRequired bool, fn func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error)) error {
+func (h *RoomsHandler) WithRoomDo(c *echo.Context, roomName string, fn func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error)) error {
 	if !isValidRoomName(roomName) {
 		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
 			Error: "invalid room name",
@@ -188,19 +188,13 @@ func (h *RoomsHandler) WithRoomDo(c *echo.Context, roomName string, authRequired
 	}
 
 	authToken := c.Request().Header.Get("x-auth-token")
-	if authRequired && authToken == "" {
-		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
-			Error: "auth token is required",
-		})
-	}
-
 	return r.Do(authToken, fn)
 }
 
 func (h *RoomsHandler) GetRoom(c *echo.Context) error {
 	roomName := c.Param("id")
 
-	return h.WithRoomDo(c, roomName, false, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+	return h.WithRoomDo(c, roomName, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
 		return roomt.EventRoomNoOp, c.JSON(http.StatusOK, room.ToResponse())
 	})
 }
@@ -324,7 +318,13 @@ func (h *RoomsHandler) CreateRoom(c *echo.Context) error {
 func (h *RoomsHandler) Reveal(c *echo.Context) error {
 	roomName := c.Param("id")
 
-	return h.WithRoomDo(c, roomName, true, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+	return h.WithRoomDo(c, roomName, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+		if player == nil {
+			return roomt.EventRoomNoOp, c.JSON(http.StatusForbidden, errresp.GenericResp{
+				Error: "invalid auth token, player not found in the room",
+			})
+		}
+
 		room.Revealed = true
 		return roomt.EventRoomUpdated, c.NoContent(http.StatusNoContent)
 	})
@@ -333,7 +333,13 @@ func (h *RoomsHandler) Reveal(c *echo.Context) error {
 func (h *RoomsHandler) Reset(c *echo.Context) error {
 	roomName := c.Param("id")
 
-	return h.WithRoomDo(c, roomName, true, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+	return h.WithRoomDo(c, roomName, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+		if player == nil {
+			return roomt.EventRoomNoOp, c.JSON(http.StatusForbidden, errresp.GenericResp{
+				Error: "invalid auth token, player not found in the room",
+			})
+		}
+
 		for _, p := range room.Players {
 			p.Card = ""
 		}
@@ -352,17 +358,19 @@ func (h *RoomsHandler) Vote(c *echo.Context) error {
 
 	roomName := c.Param("id")
 
-	return h.WithRoomDo(c, roomName, true, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+	return h.WithRoomDo(c, roomName, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
 		if player == nil {
-			return roomt.EventRoomNoOp, c.JSON(http.StatusNotFound, errresp.GenericResp{
-				Error: "player not found in the room",
+			return roomt.EventRoomNoOp, c.JSON(http.StatusForbidden, errresp.GenericResp{
+				Error: "invalid auth token, player not found in the room",
 			})
 		}
+
 		if req.Card != "" && !slices.Contains(room.AllowedCards, req.Card) {
 			return roomt.EventRoomNoOp, c.JSON(http.StatusBadRequest, errresp.GenericResp{
 				Error: "invalid card",
 			})
 		}
+
 		player.Card = req.Card
 		return roomt.EventRoomUpdated, c.NoContent(http.StatusNoContent)
 	})

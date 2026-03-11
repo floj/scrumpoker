@@ -84,6 +84,9 @@ func (r *Room) Restore(m *melody.Melody) {
 }
 
 func (r *Room) playerByAuth(authToken string) *Player {
+	if authToken == "" {
+		return nil
+	}
 	for _, p := range r.Players {
 		if p.Token == authToken {
 			return p
