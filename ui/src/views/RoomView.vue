@@ -26,8 +26,10 @@ const route = useRoute();
 
 const roomName = computed(() => route.params.id as string);
 
-const playerId = useLocalStorage('playerId');
+const playerId = ref('');
 const username = useLocalStorage('username');
+const authToken = useLocalStorage(`authToken-${roomName.value}`);
+
 const allowedCards = ref<string[]>([]);
 const players = ref<Record<string, Player>>({});
 const revealed = ref(false);
@@ -43,9 +45,10 @@ function updateRoom(room: Room) {
 
 async function joinRoom() {
   try {
-    const data = await roomService.joinRoom(roomName.value, username.value, playerId.value);
+    const data = await roomService.joinRoom(roomName.value, username.value, authToken.value);
     playerId.value = data.playerId;
     username.value = data.username;
+    authToken.value = data.authToken;
     selectedCard.value = data.selectedCard;
     updateRoom(data.room);
   } catch {
@@ -56,7 +59,7 @@ async function joinRoom() {
 async function submitVote(card: string) {
   const c = selectedCard.value === card ? '' : card;
   try {
-    await roomService.submitVote(roomName.value, playerId.value ?? '', c);
+    await roomService.submitVote(roomName.value, c, authToken.value);
     selectedCard.value = c;
   } catch {
     showToast('Failed to submit vote');
@@ -70,7 +73,7 @@ async function updateUsername(newUsername: string) {
 
 async function revealCards() {
   try {
-    await roomService.revealCards(roomName.value);
+    await roomService.revealCards(roomName.value, authToken.value);
   } catch {
     showToast('Failed to reveal cards');
   }
@@ -78,7 +81,7 @@ async function revealCards() {
 
 async function resetCards() {
   try {
-    await roomService.resetCards(roomName.value);
+    await roomService.resetCards(roomName.value, authToken.value);
   } catch {
     showToast('Failed to reset cards');
   }

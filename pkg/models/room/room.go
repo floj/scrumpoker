@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/floj/scrumpoker/pkg/handler/ws"
 	"github.com/olahol/melody"
 )
 
@@ -27,7 +28,9 @@ type Room struct {
 }
 
 type Player struct {
+	ID        string `json:"-"`
 	Name      string `json:"name"`
+	Token     string `json:"token,omitempty"`
 	Card      string `json:"card"`
 	Voted     bool   `json:"voted"`
 	UpdatedAt int64  `json:"updatedAt,omitempty"`
@@ -74,11 +77,20 @@ func (r *Room) Restore(m *melody.Melody) {
 	r.hub = m
 }
 
-func (r *Room) Do(playerID string, f func(player *Player, room *Room) (PublishEvent, error)) error {
+func (r *Room) playerByAuth(authToken string) *Player {
+	for _, p := range r.Players {
+		if p.Token == authToken {
+			return p
+		}
+	}
+	return nil
+}
+
+func (r *Room) Do(authToken string, f func(player *Player, room *Room) (PublishEvent, error)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	player, _ := r.Players[playerID]
+	player := r.playerByAuth(authToken)
 
 	pe, cberr := f(player, r)
 
@@ -86,7 +98,7 @@ func (r *Room) Do(playerID string, f func(player *Player, room *Room) (PublishEv
 		now := time.Now().Unix()
 		r.UpdatedAt = now
 		// re-lookup to catch newly created players
-		if player := r.Players[playerID]; player != nil {
+		if player := r.playerByAuth(authToken); player != nil {
 			player.UpdatedAt = now
 		}
 
@@ -99,10 +111,11 @@ func (r *Room) Do(playerID string, f func(player *Player, room *Room) (PublishEv
 			slog.Error("Failed to marshal SSE message", slog.Any("error", err))
 		} else {
 			r.hub.BroadcastFilter(sseMsg, func(s *melody.Session) bool {
-				if v, ok := s.Get("room"); ok {
-					return v == r.Name
+				sess, ok := ws.FromSession(s)
+				if !ok {
+					return false
 				}
-				return false
+				return sess.RoomName == r.Name
 			})
 		}
 	}
@@ -120,6 +133,7 @@ func (r *Room) ToResponse() Room {
 	resp.UpdatedAt = 0
 	resp.CreatedAt = 0
 	for _, p := range resp.Players {
+		p.Token = ""
 		p.Voted = p.Card != ""
 		if !r.Revealed {
 			p.Card = ""

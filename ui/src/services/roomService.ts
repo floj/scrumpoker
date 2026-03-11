@@ -16,10 +16,17 @@ type CreateRoomResponse = {
 
 type JoinRoomResponse = {
   playerId: string;
+  authToken: string;
   username: string;
   selectedCard: string;
   room: Room;
 };
+
+function withAuthToken(token: string) {
+  return (options: RequestInit) => {
+    options.headers = Object.assign(options.headers ?? {}, { 'X-Auth-Token': token });
+  };
+}
 
 class RoomService {
   private baseUrl: string;
@@ -36,21 +43,21 @@ class RoomService {
     return (await resp.json()) as CreateRoomResponse;
   }
 
-  async joinRoom(roomId: string, username: string, playerId?: string): Promise<JoinRoomResponse> {
-    const resp = await this.dispatchRequest(`/rooms/${roomId}/join`, 'POST', { username, playerId });
+  async joinRoom(roomId: string, username: string, authToken?: string): Promise<JoinRoomResponse> {
+    const resp = await this.dispatchRequest(`/rooms/${roomId}/join`, 'POST', { username, authToken });
     return (await resp.json()) as JoinRoomResponse;
   }
 
-  async revealCards(roomId: string): Promise<void> {
-    await this.dispatchRequest(`/rooms/${roomId}/reveal`, 'POST');
+  async revealCards(roomId: string, authToken: string): Promise<void> {
+    await this.dispatchRequest(`/rooms/${roomId}/reveal`, 'POST', undefined, withAuthToken(authToken));
   }
 
-  async resetCards(roomId: string): Promise<void> {
-    await this.dispatchRequest(`/rooms/${roomId}/reset`, 'POST');
+  async resetCards(roomId: string, authToken: string): Promise<void> {
+    await this.dispatchRequest(`/rooms/${roomId}/reset`, 'POST', undefined, withAuthToken(authToken));
   }
 
-  async submitVote(roomId: string, playerId: string, card: string): Promise<void> {
-    await this.dispatchRequest(`/rooms/${roomId}/vote`, 'POST', { playerId, card });
+  async submitVote(roomId: string, card: string, authToken: string): Promise<void> {
+    await this.dispatchRequest(`/rooms/${roomId}/vote`, 'POST', { card }, withAuthToken(authToken));
   }
 
   async getRoom(roomId: string): Promise<Room> {
@@ -59,7 +66,7 @@ class RoomService {
   }
 
   getWebSocket(roomId: string): WebSocket {
-    const wsUrl = this.baseUrl.replace(/^http/, 'ws') + `/rooms/${roomId}/ws`;
+    const wsUrl = this.baseUrl.replace(/^http/, 'ws') + `/rooms/${encodeURIComponent(roomId)}/ws`;
     return new WebSocket(wsUrl);
   }
 

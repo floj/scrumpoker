@@ -14,6 +14,7 @@ import (
 
 	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/floj/scrumpoker/pkg/errresp"
+	"github.com/floj/scrumpoker/pkg/handler/ws"
 	roomt "github.com/floj/scrumpoker/pkg/models/room"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
@@ -30,12 +31,13 @@ type RoomsHandler struct {
 }
 
 type JoinRoomRequest struct {
-	PlayerID string `json:"playerId"`
-	Username string `json:"username"`
+	AuthToken string `json:"authToken"`
+	Username  string `json:"username"`
 }
 
 type JoinRoomResponse struct {
 	PlayerID     string     `json:"playerId"`
+	AuthToken    string     `json:"authToken"`
 	Username     string     `json:"username"`
 	Room         roomt.Room `json:"room"`
 	SelectedCard string     `json:"selectedCard"`
@@ -46,8 +48,7 @@ type CreateRoomResponse struct {
 }
 
 type VoteRequest struct {
-	PlayerID string `json:"playerId"`
-	Card     string `json:"card"`
+	Card string `json:"card"`
 }
 
 func NewHandler(maxRooms int) (*RoomsHandler, func() error, error) {
@@ -55,6 +56,11 @@ func NewHandler(maxRooms int) (*RoomsHandler, func() error, error) {
 	tickerCleanup := time.NewTicker(5 * time.Minute)
 	ctx, cancel := context.WithCancel(context.Background())
 	m := melody.New()
+
+	m.HandleConnect(func(s *melody.Session) {
+		sess, _ := ws.FromSession(s)
+		slog.Info("websocket connected", slog.String("remote_addr", s.Request.RemoteAddr), slog.Any("room", sess.RoomName))
+	})
 
 	h := &RoomsHandler{
 		mu:       &sync.Mutex{},
@@ -146,13 +152,25 @@ func (h *RoomsHandler) cleanupRooms() {
 }
 
 func (h *RoomsHandler) EventHub(c *echo.Context) error {
-	slog.Info("new webocket connection", slog.String("room", c.Param("id")), slog.String("remote_addr", c.RealIP()))
+
+	roomName := c.Param("id")
+
+	if !isValidRoomName(roomName) {
+		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
+			Error: "invalid room name",
+		})
+	}
+
+	slog.Info("new websocket connection", slog.String("room", roomName), slog.String("remote_addr", c.RealIP()))
 	return h.m.HandleRequestWithKeys(c.Response(), c.Request(), map[string]any{
-		"room": c.Param("id"),
+		"wsSessionData": ws.WsSessionData{
+			RoomName: roomName,
+			PlayerID: "",
+		},
 	})
 }
 
-func (h *RoomsHandler) WithRoomDo(c *echo.Context, roomName string, playerID string, fn func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error)) error {
+func (h *RoomsHandler) WithRoomDo(c *echo.Context, roomName string, authRequired bool, fn func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error)) error {
 	if !isValidRoomName(roomName) {
 		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
 			Error: "invalid room name",
@@ -169,17 +187,20 @@ func (h *RoomsHandler) WithRoomDo(c *echo.Context, roomName string, playerID str
 		})
 	}
 
-	if playerID == "" {
-		playerID = c.Request().Header.Get("x-player-id")
+	authToken := c.Request().Header.Get("x-auth-token")
+	if authRequired && authToken == "" {
+		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
+			Error: "auth token is required",
+		})
 	}
 
-	return r.Do(playerID, fn)
+	return r.Do(authToken, fn)
 }
 
 func (h *RoomsHandler) GetRoom(c *echo.Context) error {
 	roomName := c.Param("id")
 
-	return h.WithRoomDo(c, roomName, "", func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+	return h.WithRoomDo(c, roomName, false, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
 		return roomt.EventRoomNoOp, c.JSON(http.StatusOK, room.ToResponse())
 	})
 }
@@ -240,27 +261,36 @@ func (h *RoomsHandler) Join(c *echo.Context) error {
 	}
 	h.mu.Unlock()
 
-	playerID := req.PlayerID
-	if playerID == "" {
-		playerID = uuid.New().String()
-	}
-
-	return r.Do(playerID, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
-		exists := player != nil
-		if !exists {
-			player = &roomt.Player{}
-			room.Players[playerID] = player
+	return r.Do("", func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+		rejoined := false
+		if req.AuthToken != "" {
+			for _, p := range room.Players {
+				if p.Token == req.AuthToken {
+					player = p
+					rejoined = true
+					break
+				}
+			}
 		}
+		if player == nil {
+			player = &roomt.Player{
+				ID:    uuid.New().String(),
+				Token: uuid.New().String(),
+			}
+			room.Players[player.ID] = player
+		}
+
 		player.Name = req.Username
 		if player.Name == "" {
 			player.Name = cases.Title(language.English).String(petname.Generate(2, " "))
 		}
-		slog.Info("player joined the room", slog.String("room", room.Name), slog.Bool("rejoined", exists), slog.String("player_id", playerID), slog.String("username", player.Name))
+		slog.Info("player joined the room", slog.String("room", room.Name), slog.Bool("rejoined", rejoined), slog.String("player_id", player.ID), slog.String("username", player.Name))
 		return roomt.EventRoomUpdated, c.JSON(http.StatusOK, JoinRoomResponse{
-			PlayerID:     playerID,
+			PlayerID:     player.ID,
+			AuthToken:    player.Token,
 			Username:     player.Name,
-			Room:         room.ToResponse(),
 			SelectedCard: player.Card,
+			Room:         room.ToResponse(),
 		})
 	})
 }
@@ -294,7 +324,7 @@ func (h *RoomsHandler) CreateRoom(c *echo.Context) error {
 func (h *RoomsHandler) Reveal(c *echo.Context) error {
 	roomName := c.Param("id")
 
-	return h.WithRoomDo(c, roomName, "", func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+	return h.WithRoomDo(c, roomName, true, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
 		room.Revealed = true
 		return roomt.EventRoomUpdated, c.NoContent(http.StatusNoContent)
 	})
@@ -303,7 +333,7 @@ func (h *RoomsHandler) Reveal(c *echo.Context) error {
 func (h *RoomsHandler) Reset(c *echo.Context) error {
 	roomName := c.Param("id")
 
-	return h.WithRoomDo(c, roomName, "", func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+	return h.WithRoomDo(c, roomName, true, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
 		for _, p := range room.Players {
 			p.Card = ""
 		}
@@ -320,12 +350,6 @@ func (h *RoomsHandler) Vote(c *echo.Context) error {
 		})
 	}
 
-	if req.PlayerID == "" {
-		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
-			Error: "playerId is required",
-		})
-	}
-
 	if req.Card == "" {
 		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
 			Error: "card is required",
@@ -334,7 +358,7 @@ func (h *RoomsHandler) Vote(c *echo.Context) error {
 
 	roomName := c.Param("id")
 
-	return h.WithRoomDo(c, roomName, req.PlayerID, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+	return h.WithRoomDo(c, roomName, true, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
 		if player == nil {
 			return roomt.EventRoomNoOp, c.JSON(http.StatusNotFound, errresp.GenericResp{
 				Error: "player not found in the room",
