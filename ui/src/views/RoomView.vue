@@ -26,6 +26,7 @@ const roomService = new RoomService();
 roomService.errHandler = async (err: any, url: string) => {
   console.error('error calling room api', 'url', url, 'error', err);
   showToast('an error occurred while communicating with the server, maybe try refreshing the page?');
+  throw err;
 };
 
 const route = useRoute();
@@ -47,6 +48,9 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let intentionalClose = false;
 
 function connectWebSocket() {
+  if(websocket) {
+    websocket.close();
+  }
   websocket = roomService.getWebSocket(roomName.value);
   websocket.onmessage = onRoomEventMessage;
   websocket.onerror = onRoomEventError;
@@ -62,15 +66,16 @@ function updateRoom(room: Room) {
   revealed.value = room.revealed;
 }
 
-async function joinRoom(): Promise<void> {
+async function joinRoom(user: string): Promise<boolean> {
   try {
-    const data = await roomService.joinRoom(roomName.value, username.value, authToken.value);
+    const data = await roomService.joinRoom(roomName.value, user, authToken.value);
     playerId.value = data.playerId;
     username.value = data.username;
     authToken.value = data.authToken;
     selectedCard.value = data.selectedCard;
+    return true;
   } catch {
-    showToast('Failed to join room');
+    return false;
   }
 }
 
@@ -85,8 +90,7 @@ async function submitVote(card: string) {
 }
 
 async function updateUsername(newUsername: string) {
-  username.value = newUsername;
-  await joinRoom();
+  await joinRoom(newUsername);
 }
 
 async function revealCards() {
@@ -110,7 +114,7 @@ function onRoomEventMessage(event: MessageEvent) {
     const message = JSON.parse(event.data) as RoomEventMessage;
     switch (message.eventName) {
       case 'room_cleared':
-        console.log('Room cleared');
+        console.log('Room cleared', message.data);
         selectedCard.value = '';
         updateRoom(message.data);
         break;
@@ -147,8 +151,7 @@ function onRoomEventClose() {
 
 onMounted(async () => {
   document.title = `no-fuzz estimates - Room ${roomName.value}`;
-  const room = await joinRoom();
-  if (room != null) {
+  if (await joinRoom(username.value)) {
     connectWebSocket();
   }
 });

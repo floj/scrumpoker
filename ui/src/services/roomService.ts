@@ -78,6 +78,7 @@ class RoomService {
     const options: RequestInit = {
       method,
       headers: {},
+      signal: AbortSignal.timeout(10000), // 10 seconds timeout for all requests
     };
 
     if (body) {
