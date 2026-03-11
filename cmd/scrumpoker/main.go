@@ -91,11 +91,10 @@ func main() {
 			healthHandler := health.NewHandler()
 			healthHandler.Register(base.Group("/health"))
 
-			roomsHandler, stop, err := rooms.NewHandler(c.Int("max-rooms"))
+			roomsHandler, err := rooms.NewHandler(ctx, c.Int("max-rooms"))
 			if err != nil {
 				return err
 			}
-			defer stop()
 			if persistFile := c.String("persist-file"); persistFile != "" {
 				if err := roomsHandler.LoadRooms(persistFile); err != nil {
 					return err

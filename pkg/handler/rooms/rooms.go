@@ -51,10 +51,9 @@ type VoteRequest struct {
 	Card string `json:"card"`
 }
 
-func NewHandler(maxRooms int) (*RoomsHandler, func() error, error) {
+func NewHandler(ctx context.Context, maxRooms int) (*RoomsHandler, error) {
 
 	tickerCleanup := time.NewTicker(5 * time.Minute)
-	ctx, cancel := context.WithCancel(context.Background())
 	m := melody.New()
 
 	m.HandleConnect(func(s *melody.Session) {
@@ -70,6 +69,8 @@ func NewHandler(maxRooms int) (*RoomsHandler, func() error, error) {
 	}
 
 	go func() {
+		defer tickerCleanup.Stop()
+		defer m.Close()
 		for {
 			select {
 			case <-tickerCleanup.C:
@@ -79,17 +80,9 @@ func NewHandler(maxRooms int) (*RoomsHandler, func() error, error) {
 				return
 			}
 		}
-
 	}()
 
-	stopFn := func() error {
-		cancel()
-		tickerCleanup.Stop()
-		m.Close()
-		return nil
-	}
-
-	return h, stopFn, nil
+	return h, nil
 }
 
 func (h *RoomsHandler) Register(e *echo.Group) {
