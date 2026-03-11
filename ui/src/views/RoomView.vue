@@ -48,16 +48,18 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let intentionalClose = false;
 
 function connectWebSocket() {
-  if(websocket) {
+  if (websocket) {
+    websocket.onmessage = null;
+    websocket.onerror = null;
+    websocket.onclose = null;
+    websocket.onopen = null;
     websocket.close();
   }
   websocket = roomService.getWebSocket(roomName.value);
   websocket.onmessage = onRoomEventMessage;
   websocket.onerror = onRoomEventError;
   websocket.onclose = onRoomEventClose;
-  websocket.onopen = () => {
-    reconnectAttempt = 0;
-  };
+  websocket.onopen = () => (reconnectAttempt = 0);
 }
 
 function updateRoom(room: Room) {
