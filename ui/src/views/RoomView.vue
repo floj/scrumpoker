@@ -35,7 +35,7 @@ const roomName = computed(() => route.params.id as string);
 
 const playerId = ref('');
 const username = useLocalStorage('username', '');
-const authToken = useLocalStorage(`authToken-${roomName.value}`);
+const authToken = useLocalStorage(() => `authToken-${roomName.value}`);
 
 const allowedCards = ref<string[]>([]);
 const players = ref<Record<string, Player>>({});
