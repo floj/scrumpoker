@@ -67,9 +67,15 @@ func (r *Room) Restore(m *melody.Melody) {
 	if r.mu == nil {
 		r.mu = &sync.Mutex{}
 	}
+
 	if r.Players == nil {
 		r.Players = map[string]*Player{}
 	}
+
+	for id, p := range r.Players {
+		p.ID = id
+	}
+
 	if r.AllowedCards == nil {
 		r.AllowedCards = DefaultCards()
 	}
@@ -154,6 +160,8 @@ func (r *Room) Copy() Room {
 	}
 	for id, p := range r.Players {
 		cpy.Players[id] = &Player{
+			ID:        id,
+			Token:     p.Token,
 			Name:      p.Name,
 			Card:      p.Card,
 			Voted:     p.Voted,

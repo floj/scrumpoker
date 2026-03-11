@@ -350,12 +350,6 @@ func (h *RoomsHandler) Vote(c *echo.Context) error {
 		})
 	}
 
-	if req.Card == "" {
-		return c.JSON(http.StatusBadRequest, errresp.GenericResp{
-			Error: "card is required",
-		})
-	}
-
 	roomName := c.Param("id")
 
 	return h.WithRoomDo(c, roomName, true, func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
@@ -364,7 +358,7 @@ func (h *RoomsHandler) Vote(c *echo.Context) error {
 				Error: "player not found in the room",
 			})
 		}
-		if !slices.Contains(room.AllowedCards, req.Card) {
+		if req.Card != "" && !slices.Contains(room.AllowedCards, req.Card) {
 			return roomt.EventRoomNoOp, c.JSON(http.StatusBadRequest, errresp.GenericResp{
 				Error: "invalid card",
 			})
