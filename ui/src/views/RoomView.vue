@@ -113,7 +113,7 @@ async function onSSEError(error: any) {
 }
 
 onMounted(async () => {
-  document.title = `No-Fuzz Scrum Poker - Room ${roomName.value}`;
+  document.title = `no-fuzz estimates - Room ${roomName.value}`;
   await joinRoom();
   eventSource = roomService.getEventStream(roomName.value);
   eventSource.onerror = onSSEError;
@@ -121,7 +121,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
-  document.title = 'Scrum Poker';
+  document.title = 'no-fuzz estimates';
   if (eventSource) {
     eventSource.close();
   }

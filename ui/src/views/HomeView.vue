@@ -22,7 +22,7 @@ async function createNewRoom() {
 
 <template>
   <div class="text-center">
-    <img src="/favicon.ico" alt="Scrum Poker" class="mb-4 d-block mx-auto" />
+    <img src="/favicon.ico" alt="no-fuzz estimates" class="mb-4 d-block mx-auto" />
     <button type="button" class="btn btn-primary btn-lg" @click="createNewRoom" :disabled="creatingRoom">
       Create new room
     </button>
