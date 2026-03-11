@@ -42,6 +42,19 @@ const revealed = ref(false);
 const selectedCard = ref('');
 
 let websocket: WebSocket | null = null;
+let reconnectAttempt = 0;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let intentionalClose = false;
+
+function connectWebSocket() {
+  websocket = roomService.getWebSocket(roomName.value);
+  websocket.onmessage = onRoomEventMessage;
+  websocket.onerror = onRoomEventError;
+  websocket.onclose = onRoomEventClose;
+  websocket.onopen = () => {
+    reconnectAttempt = 0;
+  };
+}
 
 function updateRoom(room: Room) {
   allowedCards.value = room.allowedCards;
@@ -125,18 +138,32 @@ async function onRoomEventError(error: any) {
   updateRoom(room);
 }
 
+function onRoomEventClose() {
+  if (intentionalClose) {
+    return;
+  }
+  // exponential backoff with a max delay of 10 seconds
+  const delay = Math.min(1_000 * 2 ** reconnectAttempt, 10_000);
+  reconnectAttempt++;
+  console.warn(`WebSocket closed, reconnecting in ${delay}ms (attempt ${reconnectAttempt})`);
+  showToast('Connection lost. Reconnecting…');
+  reconnectTimer = setTimeout(() => connectWebSocket(), delay);
+}
+
 onMounted(async () => {
   document.title = `no-fuzz estimates - Room ${roomName.value}`;
   const room = await joinRoom();
   if (room != null) {
-    websocket = roomService.getWebSocket(roomName.value);
-    websocket.onerror = onRoomEventError;
-    websocket.onmessage = onRoomEventMessage;
+    connectWebSocket();
   }
 });
 
 onBeforeUnmount(() => {
   document.title = 'no-fuzz estimates';
+  intentionalClose = true;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+  }
   if (websocket) {
     websocket.close();
   }
