@@ -39,29 +39,29 @@ class RoomService {
   }
 
   async createNewRoom(): Promise<CreateRoomResponse> {
-    const resp = await this.dispatchRequest('/rooms', 'POST');
+    const resp = await this.dispatchRequest(['rooms'], 'POST');
     return (await resp.json()) as CreateRoomResponse;
   }
 
   async joinRoom(roomId: string, username: string, authToken?: string): Promise<JoinRoomResponse> {
-    const resp = await this.dispatchRequest(`/rooms/${roomId}/join`, 'POST', { username, authToken });
+    const resp = await this.dispatchRequest([`rooms`, roomId, 'join'], 'POST', { username, authToken });
     return (await resp.json()) as JoinRoomResponse;
   }
 
   async revealCards(roomId: string, authToken: string): Promise<void> {
-    await this.dispatchRequest(`/rooms/${roomId}/reveal`, 'POST', undefined, withAuthToken(authToken));
+    await this.dispatchRequest([`rooms`, roomId, 'reveal'], 'POST', undefined, withAuthToken(authToken));
   }
 
   async resetCards(roomId: string, authToken: string): Promise<void> {
-    await this.dispatchRequest(`/rooms/${roomId}/reset`, 'POST', undefined, withAuthToken(authToken));
+    await this.dispatchRequest([`rooms`, roomId, 'reset'], 'POST', undefined, withAuthToken(authToken));
   }
 
   async submitVote(roomId: string, card: string, authToken: string): Promise<void> {
-    await this.dispatchRequest(`/rooms/${roomId}/vote`, 'POST', { card }, withAuthToken(authToken));
+    await this.dispatchRequest([`rooms`, roomId, 'vote'], 'POST', { card }, withAuthToken(authToken));
   }
 
   async getRoom(roomId: string): Promise<Room> {
-    const resp = await this.dispatchRequest(`/rooms/${roomId}`, 'GET');
+    const resp = await this.dispatchRequest([`rooms`, roomId], 'GET');
     return (await resp.json()) as Room;
   }
 
@@ -71,7 +71,7 @@ class RoomService {
   }
 
   private async dispatchRequest(
-    url: string,
+    url: string[],
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     body?: any,
     ...modifiers: ((r: RequestInit) => void)[]
@@ -89,17 +89,17 @@ class RoomService {
     }
 
     modifiers.forEach((modifier) => modifier(options));
+    const path = url.map(encodeURIComponent).join('/');
 
     try {
-      const resp = await fetch(`${this.baseUrl}${url}`, options);
+      const resp = await fetch(`${this.baseUrl}/${path}`, options);
       if (!resp.ok) {
-        return await this.statusHandler(resp.status, url, options);
+        return await this.statusHandler(resp.status, path, options);
       }
       return resp;
     } catch (error) {
-      return await this.errHandler(error, url, options);
+      return await this.errHandler(error, path, options);
     }
   }
 }
-const roomService = new RoomService();
-export { RoomService, roomService };
+export { RoomService };

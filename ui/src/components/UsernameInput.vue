@@ -3,7 +3,7 @@
     <label class="input-group-text" for="input-username">Username </label>
     <input
       id="input-username"
-      v-model="newUsername"
+      v-model.trim="newUsername"
       type="text"
       class="form-control"
       placeholder="Username"

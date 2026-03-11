@@ -8,7 +8,9 @@ import { computed } from 'vue';
 const route = useRoute();
 
 const isRoomView = computed(() => route.name === 'rooms');
-const link = computed(() => window.location.href);
+const link = computed(() => {
+  return route.fullPath
+});
 </script>
 
 <template>

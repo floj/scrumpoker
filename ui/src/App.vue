@@ -4,7 +4,7 @@ import Settings from './components/Settings.vue';
 
 <template>
   <div class="app-container mt-3">
-    <div class="container-sm" mb-3>
+    <div class="container-sm mb-3">
       <Settings />
       <h1 class="text-center">no-fuzz estimates</h1>
     </div>

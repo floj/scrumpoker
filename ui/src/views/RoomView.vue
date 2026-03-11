@@ -18,9 +18,15 @@ import CardSelector from '@/components/CardSelector.vue';
 import PlayerList from '@/components/PlayerList.vue';
 import UsernameInput from '@/components/UsernameInput.vue';
 import type { Player, Room, SSEMessage as RoomEventMessage } from '@/types';
-import { roomService } from '@/services/roomService';
+import { RoomService } from '@/services/roomService';
 import { useLocalStorage } from '@/composables/useLocalStorage';
 import { showToast } from '@/utils/toasts';
+
+const roomService = new RoomService();
+roomService.errHandler = async (err: any, url: string) => {
+  console.error('error calling room api', 'url', url, 'error', err);
+  showToast('an error occurred while communicating with the server, maybe try refreshing the page?');
+};
 
 const route = useRoute();
 
@@ -105,7 +111,7 @@ function onRoomEventMessage(event: MessageEvent) {
         console.warn('Unknown event type:', (message as { eventName: string }).eventName);
     }
   } catch (error) {
-    console.error('Error parsing SSE message:', error);
+    console.error('Error parsing event:', error, event.data);
   }
 }
 
