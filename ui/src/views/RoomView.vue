@@ -33,7 +33,7 @@ const route = useRoute();
 const roomName = computed(() => route.params.id as string);
 
 const playerId = ref('');
-const username = useLocalStorage('username');
+const username = useLocalStorage('username', '');
 const authToken = useLocalStorage(`authToken-${roomName.value}`);
 
 const allowedCards = ref<string[]>([]);
@@ -62,17 +62,15 @@ function updateRoom(room: Room) {
   revealed.value = room.revealed;
 }
 
-async function joinRoom(): Promise<Room | null> {
+async function joinRoom(): Promise<void> {
   try {
     const data = await roomService.joinRoom(roomName.value, username.value, authToken.value);
     playerId.value = data.playerId;
     username.value = data.username;
     authToken.value = data.authToken;
     selectedCard.value = data.selectedCard;
-    return data.room;
   } catch {
     showToast('Failed to join room');
-    return null;
   }
 }
 
@@ -88,10 +86,7 @@ async function submitVote(card: string) {
 
 async function updateUsername(newUsername: string) {
   username.value = newUsername;
-  const room = await joinRoom();
-  if (room) {
-    updateRoom(room);
-  }
+  await joinRoom();
 }
 
 async function revealCards() {

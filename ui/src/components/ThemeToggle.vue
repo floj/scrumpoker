@@ -37,12 +37,10 @@
 </template>
 
 <script setup lang="ts">
-import { watch, onMounted, onBeforeUnmount } from 'vue';
+import { watch, onMounted, onBeforeUnmount, type Ref } from 'vue';
 import { useLocalStorage } from '@/composables/useLocalStorage';
 
-type Theme = 'light' | 'dark' | 'auto';
-
-const theme = useLocalStorage<Theme>('theme', 'auto');
+const theme = useLocalStorage('theme', 'auto');
 
 const darkMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
@@ -51,8 +49,13 @@ function setTheme(resolved: 'light' | 'dark') {
 }
 
 function getPreferredTheme(): 'light' | 'dark' {
-  if (theme.value === 'light') return 'light';
-  if (theme.value === 'dark') return 'dark';
+  if (theme.value === 'light') {
+    return 'light';
+  }
+  if (theme.value === 'dark') {
+    return 'dark';
+  }
+  // else auto, so we check the system preference
   return darkMediaQuery.matches ? 'dark' : 'light';
 }
 

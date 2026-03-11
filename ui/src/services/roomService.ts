@@ -1,12 +1,12 @@
 import type { Room } from '@/types';
 import { apiBaseURL } from '@/utils/baseurl';
 
-const defaultErrHandler = (err: any, url: string, options: RequestInit) => {
+const defaultErrHandler = async (err: any, url: string, options: RequestInit) => {
   console.error('Error dispatching request:', err, 'URL:', url, 'Options:', options);
   throw err;
 };
 
-const defaultStatusHandler = (status: number, url: string, options: RequestInit) => {
+const defaultStatusHandler = async (status: number, url: string, options: RequestInit) => {
   throw new Error(`Request failed with status ${status}`);
 };
 
@@ -19,7 +19,6 @@ type JoinRoomResponse = {
   authToken: string;
   username: string;
   selectedCard: string;
-  room: Room;
 };
 
 function withAuthToken(token: string) {
