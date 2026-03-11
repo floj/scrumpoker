@@ -112,7 +112,7 @@ func (h *RoomsHandler) cleanupRooms() {
 	now := time.Now()
 
 	for _, r := range rooms {
-		r.Do("", func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+		r.Do(func(room *roomt.Room) (roomt.PublishEvent, error) {
 			if now.Sub(time.Unix(room.UpdatedAt, 0)) > 4*time.Hour {
 				rmRooms = append(rmRooms, room)
 			} else {
@@ -131,7 +131,7 @@ func (h *RoomsHandler) cleanupRooms() {
 	}
 
 	for _, r := range checkRooms {
-		r.Do("", func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+		r.Do(func(room *roomt.Room) (roomt.PublishEvent, error) {
 			rmPlayers := []string{}
 			for playerID, player := range room.Players {
 				if now.Sub(time.Unix(player.UpdatedAt, 0)) > 15*time.Minute {
@@ -188,7 +188,7 @@ func (h *RoomsHandler) WithRoomDo(c *echo.Context, roomName string, fn func(play
 	}
 
 	authToken := c.Request().Header.Get("x-auth-token")
-	return r.Do(authToken, fn)
+	return r.DoWithPlayer(authToken, fn)
 }
 
 func (h *RoomsHandler) GetRoom(c *echo.Context) error {
@@ -255,7 +255,8 @@ func (h *RoomsHandler) Join(c *echo.Context) error {
 	}
 	h.mu.Unlock()
 
-	return r.Do("", func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+	return r.Do(func(room *roomt.Room) (roomt.PublishEvent, error) {
+		var player *roomt.Player
 		rejoined := false
 		if req.AuthToken != "" {
 			for _, p := range room.Players {
@@ -393,7 +394,7 @@ func (h *RoomsHandler) SaveRooms(file string) error {
 	rMap := map[string]roomt.Room{}
 
 	for _, r := range rooms {
-		r.Do("", func(player *roomt.Player, room *roomt.Room) (roomt.PublishEvent, error) {
+		r.Do(func(room *roomt.Room) (roomt.PublishEvent, error) {
 			rMap[r.Name] = r.Copy()
 			return roomt.EventRoomNoOp, nil
 		})

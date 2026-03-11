@@ -95,7 +95,42 @@ func (r *Room) playerByAuth(authToken string) *Player {
 	return nil
 }
 
-func (r *Room) Do(authToken string, f func(player *Player, room *Room) (PublishEvent, error)) error {
+func (r *Room) Do(f func(room *Room) (PublishEvent, error)) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	pe, cberr := f(r)
+
+	if pe != EventRoomNoOp && cberr == nil {
+		now := time.Now().Unix()
+		r.UpdatedAt = now
+
+		sseMsg, err := json.Marshal(SSEMessage{
+			Event: string(pe),
+			Data:  r.ToResponse(),
+		})
+
+		if err != nil {
+			slog.Error("Failed to marshal SSE message", slog.Any("error", err))
+		} else {
+			r.hub.BroadcastFilter(sseMsg, func(s *melody.Session) bool {
+				sess, ok := ws.FromSession(s)
+				if !ok {
+					return false
+				}
+				return sess.RoomName == r.Name
+			})
+		}
+	}
+
+	if cberr != nil {
+		return cberr
+	}
+
+	return nil
+}
+
+func (r *Room) DoWithPlayer(authToken string, f func(player *Player, room *Room) (PublishEvent, error)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
