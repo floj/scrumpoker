@@ -9,7 +9,7 @@ const route = useRoute();
 
 const isRoomView = computed(() => route.name === 'rooms');
 const link = computed(() => {
-  return route.fullPath
+  return window.location.origin + route.fullPath;
 });
 </script>
 

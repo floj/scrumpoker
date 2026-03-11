@@ -13,8 +13,8 @@ async function copyToClipboard() {
   try {
     await navigator.clipboard.writeText(props.link);
     showToast('Link copied', 'success', 1000);
-  } catch {
-    showToast('Failed to copy link');
+  } catch (err) {
+    showToast(`Failed to copy link: ${err}`);
   }
 }
 </script>

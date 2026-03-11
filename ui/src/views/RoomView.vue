@@ -17,7 +17,7 @@ import CardActions from '@/components/CardActions.vue';
 import CardSelector from '@/components/CardSelector.vue';
 import PlayerList from '@/components/PlayerList.vue';
 import UsernameInput from '@/components/UsernameInput.vue';
-import type { Player, Room, SSEMessage as RoomEventMessage } from '@/types';
+import type { Player, Room, RoomEventMessage as RoomEventMessage } from '@/types';
 import { RoomService } from '@/services/roomService';
 import { useLocalStorage } from '@/composables/useLocalStorage';
 import { showToast } from '@/utils/toasts';
@@ -49,16 +49,17 @@ function updateRoom(room: Room) {
   revealed.value = room.revealed;
 }
 
-async function joinRoom() {
+async function joinRoom(): Promise<Room | null> {
   try {
     const data = await roomService.joinRoom(roomName.value, username.value, authToken.value);
     playerId.value = data.playerId;
     username.value = data.username;
     authToken.value = data.authToken;
     selectedCard.value = data.selectedCard;
-    updateRoom(data.room);
+    return data.room;
   } catch {
     showToast('Failed to join room');
+    return null;
   }
 }
 
@@ -74,7 +75,10 @@ async function submitVote(card: string) {
 
 async function updateUsername(newUsername: string) {
   username.value = newUsername;
-  await joinRoom();
+  const room = await joinRoom();
+  if (room) {
+    updateRoom(room);
+  }
 }
 
 async function revealCards() {
@@ -123,10 +127,12 @@ async function onRoomEventError(error: any) {
 
 onMounted(async () => {
   document.title = `no-fuzz estimates - Room ${roomName.value}`;
-  await joinRoom();
-  websocket = roomService.getWebSocket(roomName.value);
-  websocket.onerror = onRoomEventError;
-  websocket.onmessage = onRoomEventMessage;
+  const room = await joinRoom();
+  if (room != null) {
+    websocket = roomService.getWebSocket(roomName.value);
+    websocket.onerror = onRoomEventError;
+    websocket.onmessage = onRoomEventMessage;
+  }
 });
 
 onBeforeUnmount(() => {

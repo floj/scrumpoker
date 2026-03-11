@@ -10,4 +10,4 @@ export type Room = {
   revealed: boolean;
 };
 
-export type SSEMessage = { eventName: 'room_updated'; data: Room } | { eventName: 'room_cleared'; data: Room };
+export type RoomEventMessage = { eventName: 'room_updated'; data: Room } | { eventName: 'room_cleared'; data: Room };

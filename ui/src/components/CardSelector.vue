@@ -10,6 +10,8 @@
       @keydown.enter="emit('vote', card)"
       @keydown.space.prevent="emit('vote', card)"
       @click="emit('vote', card)"
+      :aria-label="`Select card ${card}`"
+      :aria-pressed="selectedCard === card"
     >
       <div>{{ card }}</div>
     </div>

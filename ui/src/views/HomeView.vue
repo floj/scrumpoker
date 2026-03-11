@@ -1,19 +1,20 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { roomService } from '@/services/roomService';
+import { RoomService } from '@/services/roomService';
 import { showToast } from '@/utils/toasts';
 
 const router = useRouter();
 const creatingRoom = ref(false);
+const roomService = new RoomService();
 
 async function createNewRoom() {
   creatingRoom.value = true;
   try {
     const room = await roomService.createNewRoom();
     router.push(`/rooms/${room.name}`);
-  } catch {
-    showToast('Failed to create a new room, please try again.');
+  } catch (err) {
+    showToast(`Failed to create a new room, please try again. Error: ${err}`);
   } finally {
     creatingRoom.value = false;
   }

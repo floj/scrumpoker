@@ -13,6 +13,7 @@
           'bi-moon-stars-fill': theme === 'dark',
           'bi-circle-half': theme === 'auto',
         }"
+        aria-label="Toggle theme"
       ></i>
     </button>
     <ul class="dropdown-menu">

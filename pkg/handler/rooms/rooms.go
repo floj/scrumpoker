@@ -56,11 +56,6 @@ func NewHandler(ctx context.Context, maxRooms int) (*RoomsHandler, error) {
 	tickerCleanup := time.NewTicker(5 * time.Minute)
 	m := melody.New()
 
-	m.HandleConnect(func(s *melody.Session) {
-		sess, _ := ws.FromSession(s)
-		slog.Info("websocket connected", slog.String("remote_addr", s.Request.RemoteAddr), slog.Any("room", sess.RoomName))
-	})
-
 	h := &RoomsHandler{
 		mu:       &sync.Mutex{},
 		rooms:    map[string]*roomt.Room{},
@@ -81,6 +76,32 @@ func NewHandler(ctx context.Context, maxRooms int) (*RoomsHandler, error) {
 			}
 		}
 	}()
+
+	m.HandleConnect(func(s *melody.Session) {
+		sess, ok := ws.FromSession(s)
+		if !ok {
+			return
+		}
+
+		slog.Info("websocket connected", slog.String("remote_addr", s.Request.RemoteAddr), slog.String("room", sess.RoomName))
+		h.mu.Lock()
+		r, ok := h.rooms[sess.RoomName]
+		h.mu.Unlock()
+		if !ok {
+			return
+		}
+
+		r.Do(func(room *roomt.Room) (roomt.PublishEvent, error) {
+			slog.Info("sending room update after ws connect", slog.String("remote_addr", s.Request.RemoteAddr), slog.Any("room", sess.RoomName))
+			if sseMsg, err := json.Marshal(roomt.SSEMessage{
+				Event: string(roomt.EventRoomUpdated),
+				Data:  r.ToResponse(),
+			}); err == nil {
+				s.Write(sseMsg)
+			}
+			return roomt.EventRoomNoOp, nil
+		})
+	})
 
 	return h, nil
 }
@@ -145,7 +166,6 @@ func (h *RoomsHandler) cleanupRooms() {
 }
 
 func (h *RoomsHandler) EventHub(c *echo.Context) error {
-
 	roomName := c.Param("id")
 
 	if !isValidRoomName(roomName) {
